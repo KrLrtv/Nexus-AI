@@ -4,6 +4,7 @@ import time
 import json
 from ai_provider import post_json, ProviderError, ask as fallback_ask, SYSTEM
 from learning20 import STORE as _learning20_store
+import native_learning  # NEXUS_NATIVE_PLANNER_IMPORT
 from agent import execute, save_dialog, recent_dialog, REQUIRES_APPROVAL
 
 
@@ -17,6 +18,8 @@ def nexus_r89_fast():
         return False
 
 TOOL_DESCRIPTIONS = {
+    # NEXUS_NATIVE_TOOL: arguments cannot replace the owner's task.
+    'learn_capability': 'Освоить недостающий способ и продолжить исходную задачу. Только если существующих инструментов недостаточно. Не для ошибок доступа, сети или авторизации. argument пустой: исходный запрос берётся приложением.',
     'graph_add': 'Add an explicitly supplied fact/project/device to graph; argument JSON {"kind":"project|device|person|fact|topic","label":"...","detail":"..."}. Do not invent private facts.',
     'graph_search': 'Find connected stored knowledge; argument query',
     'goal_add': 'Create a user-requested long term goal; argument title',
@@ -68,18 +71,29 @@ def plan(prompt, history, voice_mode=False):
     for _ in range(MAX_CALLS+1):
         if voice_mode and time.monotonic()-voice_started>nexus_r89_budget:
             raise ProviderError('Голосовой запрос превысил лимит времени; попробуй ещё раз')
-        data=post_json(url,{'systemInstruction':{'parts':[{'text':SYSTEM+_learning20_store.safe_context_for(prompt)+' Используй инструменты только при необходимости. Не заявляй об успешном действии без ответа инструмента. Не запрашивай голосовые коды или подтверждение кнопкой B. Не утверждай что действие выполнено до результата инструмента.'}]},'contents':contents,'tools':[{'functionDeclarations':FUNCTIONS}],'generationConfig':{'maxOutputTokens':(160 if nexus_r89_fast() and voice_mode else 350)}}, {'x-goog-api-key':key},timeout=(min(20,max(2,nexus_r89_budget-(time.monotonic()-voice_started))) if voice_mode else (7 if nexus_r89_fast() else 35)))
+        data=post_json(url,{'systemInstruction':{'parts':[{'text':SYSTEM+_learning20_store.safe_context_for(prompt)+native_learning.PLANNER_HINT+'' # NEXUS_NATIVE_HINT
+                        +' Используй инструменты только при необходимости. Не заявляй об успешном действии без ответа инструмента. Не запрашивай голосовые коды или подтверждение кнопкой B. Не утверждай что действие выполнено до результата инструмента.'}]},'contents':contents,'tools':[{'functionDeclarations':FUNCTIONS}],'generationConfig':{'maxOutputTokens':(160 if nexus_r89_fast() and voice_mode else 350)}}, {'x-goog-api-key':key},timeout=(min(20,max(2,nexus_r89_budget-(time.monotonic()-voice_started))) if voice_mode else (7 if nexus_r89_fast() else 35)))
         try: parts=data['candidates'][0]['content']['parts']
         except (KeyError,IndexError,TypeError):raise ProviderError('Gemini вернул ответ без содержимого')
         calls=[p['functionCall'] for p in parts if 'functionCall' in p]
         if not calls:
             reply=''.join(p.get('text','') for p in parts).strip() or 'Готово.'
-            return {'reply':reply,'provider':'Gemini','actions':actions,'pending':pending}
+            # NEXUS_NATIVE_GAP: only an explicit capability gap, not a provider/access failure.
+            return native_learning.after_answer(prompt,
+                {'reply':reply,'provider':'Gemini','actions':actions,'pending':pending})
         # Never execute more than MAX_CALLS requested actions.
         if len(actions)+len(pending)>=MAX_CALLS:
             return {'reply':'Лимит шагов достигнут. Можно продолжить отдельным запросом.', 'provider':'Gemini','actions':actions,'pending':pending}
         # Bound tool execution to one function call per turn, per step.
         call=calls[0];name=call.get('name','');arg=str((call.get('args') or {}).get('argument',''))[:500]
+        # NEXUS_NATIVE_DISPATCH: one acquisition per request, no replay of earlier actions.
+        if name in ('learn_capability', 'extension_request', 'evolution_draft'):
+            if actions or pending:
+                return {'reply':'Часть действий уже выполнена. Не повторяю их и не запускаю '
+                               'обучение для всего запроса заново.',
+                        'provider':'NEXUS-Native','actions':actions,'pending':pending,
+                        'learning':{'status':'partial','answered':False,'skill_id':None}}
+            return native_learning.learn(prompt)
         if name not in TOOL_DESCRIPTIONS:
             result='Недопустимый инструмент'
         elif name in REQUIRES_APPROVAL and not __import__('core10').permission(name):
