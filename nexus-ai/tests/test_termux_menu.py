@@ -140,5 +140,59 @@ class UpdateTest(unittest.TestCase):
                 self.assertEqual(len(list((cache / "backups").glob("*/nexus-ai"))), 1)
 
 
+    def test_rollback_and_cleanup_retains_wifi_and_one_version(self):
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d)
+            app = base / "nexus-ai"
+            fw = base / "nexus-firmware" / "firmware"
+            app.mkdir()
+            (app / "nexusctl.py").write_text("old code\n")
+            (fw / "src").mkdir(parents=True)
+            (fw / "platformio.ini").write_text("old firmware config")
+            (fw / "src" / "main.cpp").write_text("// old firmware\n")
+            (fw / "src" / "config_local.h").write_text('#define NEXUS_WIFI_PASSWORD "first-secret"\n')
+            cache = base / ".cache/nexus"
+            cfg = base / ".config/nexus"
+            cfg.mkdir(parents=True)
+            version = cfg / "installed_version"
+            version.write_text("v0.1.2-alpha\n")
+            archive = base / "release.zip"
+            release_zip(archive)
+            fake_ctl = types.SimpleNamespace(managed_pid=lambda: None, request_status=lambda: False,
+                                             start=lambda: None, stop=lambda: None)
+            with patch.object(up, "APP", app), patch.object(up, "FW", fw), \
+                 patch.object(up, "CACHE", cache), patch.object(up, "CFG", cfg), \
+                 patch.object(up, "VERSION_FILE", version), \
+                 patch.dict(sys.modules, {"nexusctl": fake_ctl}):
+                self.assertTrue(up.update("v0.1.3-alpha", archive))
+                self.assertEqual(len(up.backup_candidates()), 1)
+                self.assertEqual(up.backup_version(up.backup_candidates()[0]), "v0.1.2-alpha")
+                # A second upgrade must delete the older snapshot rather than hoard it.
+                (fw / "src" / "config_local.h").write_text('#define NEXUS_WIFI_PASSWORD "current-secret"\n')
+                self.assertTrue(up.update("v0.1.4-alpha", archive))
+                self.assertEqual(len(up.backup_candidates()), 1)
+                self.assertEqual(up.backup_version(up.backup_candidates()[0]), "v0.1.3-alpha")
+
+                self.assertTrue(up.rollback(approve=True))
+                self.assertEqual(version.read_text().strip(), "v0.1.3-alpha")
+                self.assertIn("current-secret", (fw / "src" / "config_local.h").read_text())
+                self.assertEqual(len(up.backup_candidates()), 1)
+                self.assertEqual(up.backup_version(up.backup_candidates()[0]), "v0.1.4-alpha")
+
+                # One more rollback toggles back to the previously active release.
+                self.assertTrue(up.rollback(approve=True))
+                self.assertEqual(version.read_text().strip(), "v0.1.4-alpha")
+                self.assertIn("current-secret", (fw / "src" / "config_local.h").read_text())
+                self.assertEqual(len(up.backup_candidates()), 1)
+
+                self.assertTrue(up.clear_backups(confirm=True))
+                self.assertEqual(len(up.backup_candidates()), 0)
+                self.assertEqual(version.read_text().strip(), "v0.1.4-alpha")
+
+    def test_rollback_without_backup_is_safe(self):
+        with tempfile.TemporaryDirectory() as d:
+            with patch.object(up, "CACHE", Path(d) / ".cache"):
+                self.assertFalse(up.rollback(approve=True))
+
 if __name__ == "__main__":
     unittest.main()
