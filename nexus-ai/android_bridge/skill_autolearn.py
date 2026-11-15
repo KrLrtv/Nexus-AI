@@ -65,8 +65,8 @@ def _answer(forge, draft, intent, reused=False):
     try:
         raw = intent.partition(':')[2].lstrip() if ':' in intent else ''
         value = forge._argument(raw) if draft['payload']['kind'] == 'pure' else ''
-        # Re-read under the same transaction used for invocation. A revoked or
-        # replaced skill must not run through the stale activation snapshot.
+        # Verify a fresh snapshot, then release SQLite before any adapter call.
+        # Revocation blocks new invocations; a read already in flight may finish.
         with forge._db() as connection:
             current = forge._decode(connection.execute(
                 'SELECT * FROM drafts WHERE id=?', (identifier,)).fetchone())
@@ -76,7 +76,7 @@ def _answer(forge, draft, intent, reused=False):
             if not hmac.compare_digest(current['digest'], draft['digest']):
                 raise ValueError('Skill changed before its first invocation.')
             _check_policy(forge, current)
-            reply = forge._invoke(current, value)
+        reply = forge._invoke(current, value)
         return LearnResult(identifier, True, True, prefix + reply)
     except Exception:
         # Do not echo provider errors or exception text that might contain data.
