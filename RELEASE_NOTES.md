@@ -1,13 +1,18 @@
-# NEXUS AI v0.1.0-alpha — draft
+# NEXUS AI v0.1.0-alpha
 
-**Not released yet.**
+Первый исходный релиз NEXUS AI для M5StickC Plus2 и Android Termux.
 
-Planned contents: M5StickC Plus2 firmware sources, Termux Android bridge,
-PTT audio streaming, sherpa-onnx Russian STT, eSpeak output, NEXUS Brain,
-Termux control center and clean F-Droid Termux installer.
+**Включено:**
+- Исходный код Android-моста, голосовых модулей и интерфейса Termux;
+- исходники прошивки M5StickC Plus2;
+- чистый установщик Termux из F-Droid (с sherpa-onnx, Ubuntu, eSpeak, PlatformIO и инструментами прошивки);
+- проверка структуры исходников GitHub Actions.
 
-Known work: gesture reliability, cloud timeouts, device permission integration,
-Android installation validation.
+**Известные ограничения:**
+- жесты наклона и стабильность интерфейса требуют проверки на конкретном устройстве;
+- Gemini может возвращать ProviderError / тайм-ауты;
+- Termux:API APK устанавливается отдельно, разрешения выдаются в Android;
+- секреты и конфигурацию устройства необходимо настроить локально;
+- прошивка M5StickC Plus2 выполняется отдельно по явной команде.
 
-Do not publish a GitHub Release until all source files have been reviewed for
-embedded Wi-Fi credentials, cloud API keys and device tokens, and an install test passes.
+Это предварительный релиз, не NEXUS 1.0 Stable.

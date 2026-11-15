@@ -1,0 +1,34 @@
+name: Source checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python syntax
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          files=list(Path('nexus-ai').rglob('*.py'))
+          for path in files:
+              if any(x in path.parts for x in ('.venv','venv')): continue
+              ast.parse(path.read_text(encoding='utf-8-sig'), filename=str(path))
+          print('Parsed', len(files), 'Python files')
+          PY
+      - name: Shell syntax
+        run: bash -n install.sh scripts/termux-install.sh
+      - name: Public-source secret audit
+        run: python scripts/check_public_source.py
+      - name: Source structure
+        run: |
+          test -f nexus-ai/nexusctl.py
+          test -f nexus-ai/android_bridge/app.py
+          test -f nexus-ai/android_bridge/planner.py
+          test -f nexus-firmware/firmware/platformio.ini
+          test -f nexus-firmware/firmware/src/main.cpp
