@@ -224,7 +224,7 @@ class ControlCenter:
             ]
         if self.page == 'forge':
             return [
-                ('Создать новый модуль с Gemini','forge-create'),
+                ('Научиться и сразу ответить','forge-create'),
                 ('Все черновики навыков','forge-list'),
                 ('Посмотреть код и тесты','forge-view'),
                 ('Повторить проверки','forge-test'),
@@ -384,21 +384,17 @@ class ControlCenter:
         if action=='skills': self.page='skills';self.flash='';return
         if action=='forge': self.page='forge';self.flash='';return
         if action=='forge-create':
+            # NEXUS_AUTO_ANSWER_V205
             def create_module():
-                request=input('Какой новый навык спроектировать: ').strip()
+                from skill_autolearn import learn_and_answer
+                print('Проверенный безопасный навык включится и ответит автоматически.')
+                request=input('Задача (для обработки данных: задача: данные): ').strip()
                 if not request:
                     print('Задача не введена. Отменено.')
                     return False
-                draft=forge.propose(request)
-                print('Черновик #'+str(draft['id'])+' · '+draft['name'])
-                print(draft['summary'])
-                print('Статус:',draft['state'])
-                print('Тесты:',draft['report']['checks'])
-                if draft['state']=='tested':
-                    print('Код не исполнялся. Включить можно отдельным пунктом меню.')
-                else:
-                    print('Требуется ревью исходников; автоматическое включение запрещено.')
-                return True
+                result=learn_and_answer(request)
+                print(sanitise(result.reply))
+                return result.active
             self.popup(create_module);return
         if action=='forge-list':
             def drafts():
