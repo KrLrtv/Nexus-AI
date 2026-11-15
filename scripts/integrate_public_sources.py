@@ -1,0 +1,33 @@
+"""Build-time migration for the exact v2.0.6 sources; never runs on the phone.
+Pre/post SHA256 makes reapplication idempotent and rejects unknown edits.
+"""
+from pathlib import Path
+import ast
+import hashlib
+ROOT = Path(__file__).resolve().parents[1]
+PATCHES = [('nexus-ai/android_bridge/app.py', '64aed07eae3fa5843ddb7675ea6e049c338c4a7325445b57382e6d9cdef79590', 'ee368d159696910ae1ec6a025604081e756320448a3ba9b8357505d9f48d7623', [('from session import VoiceSession\n', 'import source_learning as _source_learning\nfrom session import VoiceSession\n'), ('        state.update(reply=reply[:1500]', "        state.pop('sources', None)\n        state.pop('search_suggestions', None)\n        state.update(reply=reply[:1500]"), ('def authorized():\n', "def publish_source_result(outcome, event):\n    publish(outcome['reply'], 'ANSWER via NEXUS Sources', event)\n    with mutex:\n        state['sources'] = outcome.get('sources', [])\n        state['search_suggestions'] = outcome.get('search_suggestions', '')\n\ndef authorized():\n"), ("    if not text:return {'error':'Пустой запрос'},400\n", "    # NEXUS_PUBLIC_CONTROL: cancellation also revokes the source work lease.\n    if _native_learning.normalized(_native_learning.PREFIX.sub('', text)).rstrip('.!?') in ('выключи автообучение', 'выключить автообучение', 'отключи автообучение', 'останови обучение', 'отмени обучение'):\n        _source_learning.cancel()\n    source_control = _source_learning.ENGINE.control(text)\n    if source_control is not None:\n        publish_source_result(source_control, event)\n        return source_control, 200\n    if not text:return {'error':'Пустой запрос'},400\n"), ('    # NEXUS_NATIVE_REUSE: exact operation + fresh data, without a cloud call.\n', '    # NEXUS_PUBLIC_REUSE: same query gets fresh data; followups keep the task.\n    source_result = _source_learning.reuse(text)\n    if source_result is None:\n        source_result = _source_learning.resume(text)\n    if source_result is not None:\n        publish_source_result(source_result, event)\n        return source_result, 200\n    # NEXUS_NATIVE_REUSE: exact operation + fresh data, without a cloud call.\n'), ('        _native_learning.cancel()  # NEXUS_NATIVE_DEVICE_STOP\n', '        _source_learning.cancel()\n        _native_learning.cancel()  # NEXUS_NATIVE_DEVICE_STOP\n'), ('        _native_learning.cancel()  # NEXUS_NATIVE_TEXT_STOP\n', '        _source_learning.cancel()\n        _native_learning.cancel()  # NEXUS_NATIVE_TEXT_STOP\n'), ('    # Optional voice output on Android; opt-in only and never synthesize an unapproved tool action.\n', "    if response.get('provider') == 'NEXUS-Sources':\n        with mutex:\n            state['sources'] = response.get('sources', [])\n            state['search_suggestions'] = response.get('search_suggestions', '')\n    # Optional voice output on Android; opt-in only and never synthesize an unapproved tool action.\n"), ("return {'reply':answer,'provider':response['provider'],'actions':response['actions'],'pending':bool(response.get('pending')),", "return {'reply':answer,'provider':response['provider'],'actions':response['actions'],\n            'sources':response.get('sources', []),'source_skill_id':response.get('source_skill_id'),\n            'search_suggestions':response.get('search_suggestions', ''),\n            'pending':bool(response.get('pending')),"), ('    # NEXUS_NATIVE_VOICE: do not bypass task routing on legacy /voice.\n', '    # NEXUS_PUBLIC_VOICE: the legacy audio shortcut must not invent live facts.\n    from nexus_quickbrain_r81 import is_fast_info\n    if not is_fast_info(transcript):\n        return False\n    # NEXUS_NATIVE_VOICE: do not bypass task routing on legacy /voice.\n'), ('<div id="approval"></div>', '<div id="approval"></div>\n<iframe id="searchSuggestions" title="Google Search suggestions" sandbox="allow-popups allow-popups-to-escape-sandbox" style="width:100%;border:0" hidden></iframe>'), ('if(lastSeq>=0&&j.seq!==lastSeq', "let sg=document.getElementById('searchSuggestions');sg.hidden=!j.search_suggestions;if(j.search_suggestions&&sg.srcdoc!==j.search_suggestions)sg.srcdoc=j.search_suggestions;\nif(lastSeq>=0&&j.seq!==lastSeq")]), ('nexus-ai/android_bridge/planner.py', 'a979f62e1cc688ac0d09dc7045351bc02d6434ccaa2b4fe47c44705d5b6a0c40', '1de0e8392088440d0b0ed24a021ca4c682d49bef86d80f6a73ff03948f042f6a', [('from agent import execute, save_dialog, recent_dialog, REQUIRES_APPROVAL\n', 'from agent import execute, save_dialog, recent_dialog, REQUIRES_APPROVAL\nimport source_learning\nSYSTEM = SYSTEM + source_learning.PLANNER_HINT\n'), ("    'speak': 'Произнести текст через Android TTS по запросу пользователя',\n", "    'speak': 'Произнести текст через Android TTS по запросу пользователя',\n    'learn_public_source': 'Самостоятельно найти и изучить публичные источники, собрать проверяемый сценарий чтения и ответить. Для актуальных сведений, публичных API, документов, лент; также для вопросов без повелительного глагола. argument пустой; выполняется исходный запрос пользователя.',\n"), ('        # NEXUS_NATIVE_DISPATCH: one acquisition per request, no replay of earlier actions.\n', "        # NEXUS_PUBLIC_DISPATCH: model arguments never replace the user request.\n        if name == 'learn_public_source':\n            if actions or pending:\n                return {'reply':'Часть действий уже выполнена. Не запускаю исходную задачу заново.',\n                        'provider':'NEXUS-Sources','actions':actions,'pending':pending,\n                        'learning':{'status':'partial','answered':False}}\n            import source_learning\n            return source_learning.learn(prompt)\n        # NEXUS_NATIVE_DISPATCH: one acquisition per request, no replay of earlier actions.\n")])]
+
+def main():
+    outputs = []
+    for relative, before, after, edits in PATCHES:
+        path = ROOT / relative
+        source = path.read_text(encoding='utf-8')
+        current = hashlib.sha256(source.encode()).hexdigest()
+        if current == after:
+            continue
+        if current != before:
+            raise RuntimeError('Unexpected source revision: ' + relative)
+        for old, new in edits:
+            if source.count(old) != 1:
+                raise RuntimeError('Ambiguous integration anchor')
+            source = source.replace(old, new, 1)
+        ast.parse(source)
+        if hashlib.sha256(source.encode()).hexdigest() != after:
+            raise RuntimeError('Unexpected integrated source')
+        outputs.append((path, source))
+    for path, source in outputs:
+        path.write_text(source, encoding='utf-8')
+    print('Public-source integration ready.')
+
+if __name__ == '__main__':
+    main()
