@@ -76,7 +76,9 @@ def _primitive(value):
             raise ValueError("Строка превышает безопасный лимит.")
         return value
     if type(value) in (int,float,bool) or value is None:
-        if type(value) in (int,float) and (not math.isfinite(value) or abs(value)>1e9):
+        if type(value) is int and abs(value)>1_000_000_000:
+            raise ValueError("Целое число превышает безопасный лимит.")
+        if type(value) is float and (not math.isfinite(value) or abs(value)>1e9):
             raise ValueError("Число превышает безопасный лимит.")
         return value
     raise ValueError("Поддерживаются только строки, числа и логические значения.")
