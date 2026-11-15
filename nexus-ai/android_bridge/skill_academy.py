@@ -8,6 +8,7 @@ are not sent to Gemini during the local SMS workflow.
 from __future__ import annotations
 import json
 import os
+from contextlib import contextmanager
 import re
 import secrets
 import shutil
@@ -85,30 +86,42 @@ def status():
             "sms_cli":bool(shutil.which("termux-sms-send")),
             "configured":bool(load_skill("sms"))}
 
+@contextmanager
 def _connect():
     DB_PATH.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
     if DB_PATH.is_symlink():
         raise RuntimeError("База навыков не должна быть символической ссылкой.")
     if not DB_PATH.exists():
-        fd=os.open(DB_PATH,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
-        os.close(fd)
+        try:
+            fd=os.open(DB_PATH,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
+            os.close(fd)
+        except FileExistsError:
+            if DB_PATH.is_symlink():
+                raise RuntimeError("Небезопасная ссылка на базу навыков.")
     os.chmod(DB_PATH,0o600)
     c=sqlite3.connect(DB_PATH,timeout=10)
-    c.execute("PRAGMA busy_timeout=10000")
-    c.execute("""CREATE TABLE IF NOT EXISTS skill_library(
-      kind TEXT PRIMARY KEY, status TEXT NOT NULL, metadata TEXT NOT NULL DEFAULT '{}',
-      updated INTEGER NOT NULL)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS skill_goals(
-      id INTEGER PRIMARY KEY, kind TEXT NOT NULL, intent TEXT NOT NULL,
-      recipient TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
-      created INTEGER NOT NULL)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS skill_sessions(
-      id INTEGER PRIMARY KEY, goal_id INTEGER NOT NULL, stage TEXT NOT NULL,
-      recipient TEXT NOT NULL, contact TEXT NOT NULL DEFAULT '',
-      number TEXT NOT NULL DEFAULT '', message TEXT NOT NULL DEFAULT '',
-      candidates TEXT NOT NULL DEFAULT '[]', created INTEGER NOT NULL,
-      updated INTEGER NOT NULL)""")
-    return c
+    try:
+        c.execute("PRAGMA busy_timeout=10000")
+        c.execute("""CREATE TABLE IF NOT EXISTS skill_library(
+          kind TEXT PRIMARY KEY, status TEXT NOT NULL, metadata TEXT NOT NULL DEFAULT '{}',
+          updated INTEGER NOT NULL)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS skill_goals(
+          id INTEGER PRIMARY KEY, kind TEXT NOT NULL, intent TEXT NOT NULL,
+          recipient TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
+          created INTEGER NOT NULL)""")
+        c.execute("""CREATE TABLE IF NOT EXISTS skill_sessions(
+          id INTEGER PRIMARY KEY, goal_id INTEGER NOT NULL, stage TEXT NOT NULL,
+          recipient TEXT NOT NULL, contact TEXT NOT NULL DEFAULT '',
+          number TEXT NOT NULL DEFAULT '', message TEXT NOT NULL DEFAULT '',
+          candidates TEXT NOT NULL DEFAULT '[]', created INTEGER NOT NULL,
+          updated INTEGER NOT NULL)""")
+        yield c
+        c.commit()
+    except BaseException:
+        c.rollback()
+        raise
+    finally:
+        c.close()
 
 def load_skill(kind):
     with LOCK:
@@ -248,7 +261,7 @@ def _learn(goal):
     # For unknown capabilities, attempt a declarative READ-ONLY recipe. Never
     # execute arbitrary model-written code or install packages from model output.
     try:
-        from extensions import propose,decide,run
+        from extensions import propose
         proposal=propose(goal["intent"])
     except Exception:
         return ("Пока не получилось создать безопасный навык. Я сохранил незавершённую задачу. "
@@ -259,6 +272,7 @@ def _learn(goal):
     ident=proposal["id"]
     # User explicitly said "научись". Existing extensions only allow bounded
     # read-only steps; verified again by decide(). Other action types are blocked.
+    from extensions import decide,run
     result,status_code=decide(ident,True)
     if status_code!=200:
         return "Новый навык не прошёл проверку и не был активирован."
