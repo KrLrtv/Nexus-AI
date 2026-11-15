@@ -145,14 +145,14 @@ def _build_tool() -> str:
 def build() -> bool:
     tool = _build_tool()
     if not CONFIG.is_file() or not _value("NEXUS_WIFI_SSID"):
-        print("Сначала настрой Wi-Fi через меню M5StickC.")
+        print("Wi-Fi M5 не настроен. Выбери пункт 2 «Настроить Wi-Fi», затем повтори сборку.")
         return False
     if not _device_token():
         return False
     print("Сборка прошивки (без записи на M5StickC)...", flush=True)
     result = subprocess.run([tool, "run", "-e", "m5stickc_plus2", "--build-only"], cwd=FIRMWARE, check=False)
     if result.returncode != 0 or not BINARY.is_file():
-        print("Ошибка компиляции. Запись на устройство не выполнялась.")
+        print("Ошибка компиляции. Запись не выполнялась. Для подробностей запусти: nexus m5 build")
         return False
     if BINARY.stat().st_mtime + 1 < CONFIG.stat().st_mtime:
         print("Не подтверждена свежесть собранного firmware.bin; прошивать нельзя.")
