@@ -1,11 +1,11 @@
-name: Publish NEXUS v2.0.6-alpha Native Learning
+name: Publish NEXUS v2.0.7-alpha Public Source Learning
 on:
   push:
-    branches: [release/native-learning-v2.0.6]
+    branches: [release/public-sources-v2.0.7]
 permissions:
   contents: write
 concurrency:
-  group: nexus-native-v2.0.6-release
+  group: nexus-public-v2.0.7-release
   cancel-in-progress: false
 jobs:
   release:
@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Prepare pinned preview metadata
-        run: python scripts/prepare_native_preview_release.py
+        run: python scripts/prepare_public_sources_release.py
       - name: Validate source and metadata
         run: |
           set -euo pipefail
@@ -24,56 +24,65 @@ jobs:
           python scripts/check_release_consistency.py
           python scripts/check_public_source.py
           sha256sum --check SHA256SUMS.txt
+          python scripts/integrate_public_sources.py
           python - <<'PY'
           import ast, json
           from pathlib import Path
           for root in ('nexus-ai', 'scripts'):
               for p in Path(root).rglob('*.py'):
                   ast.parse(p.read_text(encoding='utf-8-sig'), filename=str(p))
-          preview = json.loads(Path('releases/preview.json').read_text())
-          assert preview['tag'] == 'v2.0.6-alpha' and preview['channel'] == 'preview'
-          assert 'native_learning' in Path('nexus-ai/android_bridge/app.py').read_text()
-          assert 'learn_capability' in Path('nexus-ai/android_bridge/planner.py').read_text()
+          data = json.loads(Path('releases/preview.json').read_text())
+          assert data['tag'] == 'v2.0.7-alpha' and data['channel'] == 'preview'
+          assert 'learn_public_source' in Path('nexus-ai/android_bridge/planner.py').read_text()
           PY
-      - name: Run full offline suite
+      - name: Run complete offline suite
         run: |
           set -euo pipefail
-          python -m unittest discover -s nexus-ai/tests -p 'test_*.py' -v 2>&1 | tee /tmp/nexus-v2.0.6-tests.txt
-      - name: Commit tested metadata and publish immutable prerelease
+          python -m unittest discover -s nexus-ai/tests -p 'test_*.py' -v 2>&1 | tee /tmp/nexus-v2.0.7-tests.txt
+      - name: Live public HTTPS smoke test
+        run: |
+          set -euo pipefail
+          PYTHONPATH=nexus-ai/android_bridge python - <<'PY' | tee /tmp/nexus-v2.0.7-https.txt
+          import json
+          from source_http import fetch
+          doc = fetch('https://api.github.com/repos/KrLrtv/Nexus-AI')
+          assert json.loads(doc.body)['full_name'] == 'KrLrtv/Nexus-AI'
+          print('Live public HTTPS transport: OK; pinned DNS, verified TLS, parsed JSON.')
+          print('Retrieved:', doc.retrieved_at, 'SHA256:', doc.digest)
+          print('Live Gemini, Android and M5 were NOT tested.')
+          PY
+      - name: Commit tested metadata and publish new prerelease
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          TAG="v2.0.6-alpha"
-          BRANCH='release/native-learning-v2.0.6'
+          TAG="v2.0.7-alpha"
+          BRANCH='release/public-sources-v2.0.7'
           test "$GITHUB_REF_NAME" = "$BRANCH"
           git fetch origin "$BRANCH"
           test "$(git rev-parse FETCH_HEAD)" = "$GITHUB_SHA"
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add install.sh scripts/termux-install.sh README.md RELEASE_NOTES.md \
-            V2_RELEASE_NOTES.md docs/NEXUS_NATIVE_LEARNING.md \
-            releases/channel.json releases/preview.json SHA256SUMS.txt
-          git commit -m 'release: pin tested NEXUS v2.0.6-alpha source metadata'
-          git push origin "HEAD:$BRANCH"
-          SHA="$(git rev-parse HEAD)"
-          # Existing tags/releases must never be moved or overwritten.
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo 'Release already exists; refusing to overwrite.' >&2
+            echo 'Release exists; refusing to overwrite.' >&2
             exit 1
           fi
           if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
-            git fetch origin "refs/tags/$TAG:refs/tags/$TAG"
-            test "$(git rev-parse "$TAG^{commit}")" = "$SHA"
+            echo 'Tag exists; refusing to move it.' >&2
+            exit 1
           fi
-          mkdir -p /tmp/nexus-native-release
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add install.sh scripts/termux-install.sh README.md RELEASE_NOTES.md \
+            V2_RELEASE_NOTES.md releases/channel.json releases/preview.json SHA256SUMS.txt
+          git commit -m 'release: pin tested v2.0.7-alpha Public Source Learning metadata'
+          git push origin "HEAD:$BRANCH"
+          SHA="$(git rev-parse HEAD)"
+          mkdir -p /tmp/nexus-public-release
           git archive --format=zip --prefix="Nexus-AI-$TAG/" \
-            -o "/tmp/nexus-native-release/nexus-$TAG-source.zip" HEAD
-          cp /tmp/nexus-v2.0.6-tests.txt /tmp/nexus-native-release/
-          (cd /tmp/nexus-native-release && sha256sum "nexus-$TAG-source.zip" nexus-v2.0.6-tests.txt > SHA256SUMS.txt)
-          gh release create "$TAG" /tmp/nexus-native-release/* \
-            --target "$SHA" --title 'NEXUS AI v2.0.6-alpha — Native Learning' \
+            -o "/tmp/nexus-public-release/nexus-$TAG-source.zip" HEAD
+          cp /tmp/nexus-v2.0.7-tests.txt /tmp/nexus-v2.0.7-https.txt /tmp/nexus-public-release/
+          (cd /tmp/nexus-public-release && sha256sum "nexus-$TAG-source.zip" nexus-v2.0.7-tests.txt nexus-v2.0.7-https.txt > SHA256SUMS.txt)
+          gh release create "$TAG" /tmp/nexus-public-release/* \
+            --target "$SHA" --title 'NEXUS AI v2.0.7-alpha — Public Source Learning' \
             --notes-file RELEASE_NOTES.md --prerelease
-          echo "Published $TAG from tested commit $SHA"
-          echo "Preview pointer in main is intentionally updated separately after verification."
+          echo "Published $TAG from tested source $SHA; main preview pointer is updated separately."
