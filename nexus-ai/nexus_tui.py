@@ -283,7 +283,7 @@ class ControlCenter:
             for rec in records:
                 self.line(str(rec['id'])+' · '+rec['text'],w,'38;2;221;229;242')
             print()
-            self.line('0 назад · R обновить · Q выход',w)
+            self.line('F поиск · 0 назад · R обновить · Q выход',w)
         elif self.page=='logs':
             print(c('  ЖУРНАЛ СОБЫТИЙ',ACCENT,True))
             print()
@@ -586,6 +586,10 @@ class ControlCenter:
                     if self.page=='home': return
                     self.page='learn' if self.page in ('learning-list','learn-manage','skills') else 'home'
                     self.flash='';continue
+                if self.page=='learning-list' and key=='f':
+                    try: self.learning_filter=input('Поиск в памяти (Enter = всё): ').strip()[:150]
+                    except (EOFError,KeyboardInterrupt): self.flash='Поиск отменён'
+                    continue
                 if key=='r': self.cache_until=0;continue
                 if self.page not in ('home','settings','m5','learn','versions','learn-manage','skills'): continue
                 entries=self.entries()
