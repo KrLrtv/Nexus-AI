@@ -382,6 +382,12 @@ fi
 init_log
 STAGE="$(mktemp -d "${TMPDIR:-$PREFIX/tmp}/nexus-fresh-XXXXXX")"
 if [[ "$ACTION" == install ]]; then
+  # A fresh F-Droid Termux has no Python: the ZIP verifier below requires it.
+  # Install only this prerequisite before verifying the archive structure.
+  if ! command -v python >/dev/null 2>&1; then
+    info 'Устанавливаю Python для предварительной проверки релизного ZIP...'
+    pkg install -y python
+  fi
   fetch_release "$2" >/dev/null
   extract_release "$STAGE/release.zip" "$STAGE/precheck"
   rm -rf "$STAGE/precheck"
