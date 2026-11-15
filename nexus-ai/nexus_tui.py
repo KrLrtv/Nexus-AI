@@ -27,7 +27,7 @@ import nexus_device as m5
 import nexus_update as releases
 import nexus_autostart as shell_startup
 sys.path.insert(0, str(ROOT / 'android_bridge'))
-from learning20 import STORE as learning_store
+from learning20 import STORE as learning_store, previous_exchange as learning_previous_exchange
 
 CFG = Path.home() / '.config' / 'nexus'
 LOG = Path.home() / 'nexus-ai.log'
@@ -201,9 +201,17 @@ class ControlCenter:
             shared = learning_store.sharing()
             return [
                 ('Состояние обучения','learn-stats'),
+                ('Запомнить факт','learn-fact'),
+                ('Запомнить предпочтение','learn-preference'),
                 ('Воспоминания · список','learn-list'),
                 ('Найти в памяти','learn-search'),
+                ('Исправить последний ответ','learn-correct'),
+                ('Оценить последний ответ','learn-rate'),
                 ('Gemini: передавать память · '+('ДА' if shared else 'НЕТ'),'learn-toggle'),
+                ('Удаление и очистка памяти','learn-manage'),
+            ]
+        if self.page == 'learn-manage':
+            return [
                 ('Удалить запись по ID','learn-forget'),
                 ('Очистить всю память · подтверждение','learn-clear'),
             ]
@@ -360,6 +368,55 @@ class ControlCenter:
                 print('Исправлений:',data['corrections'])
                 print('Облачная персонализация:', 'включена' if data['cloud_personalization'] else 'выключена')
             self.popup(learn_stats);return
+        if action=='learn-fact' or action=='learn-preference':
+            def add_learning():
+                kind = 'preference' if action=='learn-preference' else 'fact'
+                value=input('Что запомнить' + (' как предпочтение' if kind=='preference' else '') + ': ').strip()
+                if not value:
+                    print('Пустой ввод. Отменено.')
+                    return False
+                rec_id=learning_store.remember(value,kind)
+                print('Сохранено локально. ID записи:',rec_id)
+                return True
+            self.popup(add_learning,sensitive=True);return
+        if action=='learn-correct':
+            def correct_last():
+                from agent import recent_dialog
+                exchange=learning_previous_exchange(recent_dialog())
+                if not exchange:
+                    print('Нет завершённого ответа NEXUS для исправления.')
+                    return False
+                question,answer=exchange
+                print('Последний вопрос:',question[:130])
+                print('Прежний ответ:',answer[:160])
+                correction=input('Правильный ответ (Enter = отмена): ').strip()
+                if not correction:
+                    print('Изменение отменено.')
+                    return False
+                feedback_id=learning_store.feedback(question,answer,-1,correction)
+                print('Исправление сохранено. ID:',feedback_id)
+                return True
+            self.popup(correct_last,sensitive=True);return
+        if action=='learn-rate':
+            def rate_last():
+                from agent import recent_dialog
+                exchange=learning_previous_exchange(recent_dialog())
+                if not exchange:
+                    print('Нет завершённого ответа для оценки.')
+                    return False
+                question,answer=exchange
+                print('Последний вопрос:',question[:130])
+                print('Ответ:',answer[:160])
+                value=input('Оценка: 1 — верно, 2 — неверно, 0 — отмена: ').strip()
+                if value not in ('1','2'):
+                    print('Оценка отменена.')
+                    return False
+                learning_store.feedback(question,answer,1 if value=='1' else -1)
+                print('Оценка сохранена локально.')
+                return True
+            self.popup(rate_last);return
+        if action=='learn-manage':
+            self.page='learn-manage';self.flash='';return
         if action=='learn-list':
             self.learning_filter='';self.page='learning-list';self.flash='';return
         if action=='learn-search':
@@ -369,8 +426,12 @@ class ControlCenter:
         if action=='learn-toggle':
             def toggle_learning():
                 enabled=not learning_store.sharing()
+                if enabled and input('Передавать выбранные воспоминания в Gemini? Введи ДА: ').strip()!='ДА':
+                    print('Передача памяти осталась выключенной.')
+                    return False
                 learning_store.set_sharing(enabled)
                 print('Передача релевантных воспоминаний в Gemini:', 'ВКЛ' if enabled else 'ВЫКЛ')
+                return True
             self.popup(toggle_learning);return
         if action=='learn-forget':
             def forget_memory():
