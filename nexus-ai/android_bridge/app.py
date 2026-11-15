@@ -13,6 +13,7 @@ from planner import plan
 from reminder_clock import worker as reminder_worker, listing as reminder_listing
 from memory import recall as memory_recall
 from learning20 import handle_command as _learning20_handle, STORE as _learning20_store
+from skill_academy import handle as _skill_academy_handle, note_refusal as _skill_academy_note_refusal
 from core10 import permission,set_permission,goals,graph_search,logs,get_events,ack_events,enqueue,log
 from gestures import train, configure, match, SAFE_GESTURE_ACTIONS
 import nexus_runtime_settings as nexus_settings  # NEXUS_R8_SETTINGS
@@ -163,6 +164,18 @@ def event():
 def process_text(text,event='text'):
     text=text.strip()[:3000]  # NEXUS_R86_PTT_10SEC
     if not text:return {'error':'Пустой запрос'},400
+    # NEXUS 2.1: "научись" and interactive skills are routed locally BEFORE
+    # a cloud request. Contact names/numbers, SMS drafts and confirmations
+    # never enter Gemini dialogue history or the general tool planner.
+    try:
+        skill_reply=_skill_academy_handle(text, recent_dialog())
+    except Exception:
+        app.logger.exception('NEXUS Skill Academy failed')
+        skill_reply="Ошибка обучения новому навыку. Ничего не отправлено."
+    if skill_reply is not None:
+        publish(skill_reply, 'SKILL', event)
+        return {'reply':skill_reply,'provider':'NEXUS-Skill-Academy',
+                'actions':[], 'pending':False},200
     # NEXUS 2.0 local learning: process explicit owner commands BEFORE any
     # cloud call. Do not save these commands to dialog history, otherwise
     # memories could leak into future Gemini history even when sharing is OFF.
@@ -263,6 +276,10 @@ def process_text(text,event='text'):
     # The bounded planner already issued a single-use approval challenge.
     answer=response['reply']
     save_dialog('user',text);save_dialog('assistant',answer)
+    try:
+        _skill_academy_note_refusal(text,answer)
+    except Exception:
+        app.logger.warning('NEXUS Skill Academy: could not remember unsupported intent')
     publish(answer,'CONFIRM' if response.get('pending') else 'ANSWER via '+response['provider'],event)
     # Optional voice output on Android; opt-in only and never synthesize an unapproved tool action.
     if os.environ.get('NEXUS_AUTO_TTS')=='1' and not response.get('pending'):
