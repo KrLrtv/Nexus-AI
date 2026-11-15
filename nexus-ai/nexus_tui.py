@@ -9,6 +9,7 @@ import io
 import os
 import re
 import select
+import subprocess
 import shutil
 import socket
 import sys
@@ -22,6 +23,7 @@ from pathlib import Path
 ROOT = Path.home() / 'nexus-ai'
 sys.path.insert(0, str(ROOT))
 import nexusctl as engine
+import nexus_device as m5
 
 CFG = Path.home() / '.config' / 'nexus'
 LOG = Path.home() / 'nexus-ai.log'
@@ -139,7 +141,7 @@ class Tee(io.TextIOBase):
 class ControlCenter:
     def __init__(self):
         self.page = 'home'
-        self.selected = {'home':0,'settings':0}
+        self.selected = {'home':0,'settings':0,'m5':0}
         self.flash = ''
         self.cache_until = 0.0
         self.port = False
@@ -160,9 +162,19 @@ class ControlCenter:
             return [
                 ('Остановить сервер' if pid or up else 'Запустить сервер','toggle'),
                 ('Перезапустить NEXUS','restart'),
+                ('M5StickC Plus2 · Wi-Fi и прошивка','m5'),
                 ('Настройки AI и голоса','settings'),
+                ('Обновить NEXUS из GitHub','update'),
                 ('Журнал событий','logs'),
                 ('Диагностика','diagnostics'),
+            ]
+        if self.page == 'm5':
+            return [
+                ('Состояние и параметры M5','m5-status'),
+                ('Настроить Wi-Fi M5StickC','m5-wifi'),
+                ('Собрать прошивку (без записи)','m5-build'),
+                ('Прошить собранную версию','m5-flash'),
+                ('Собрать и прошить M5','m5-build-flash'),
             ]
         if self.page == 'settings':
             voice = read_mode('voice_clarity_mode','clear', {'clear','original'})
@@ -195,8 +207,8 @@ class ControlCenter:
         except Exception: model = 'не определена'
         self.line('Модель: '+model,w)
         print()
-        if self.page in ('home','settings'):
-            print(c('  ГЛАВНАЯ' if self.page=='home' else '  НАСТРОЙКИ',ACCENT,True))
+        if self.page in ('home','settings','m5'):
+            print(c({'home':'  ГЛАВНАЯ','settings':'  НАСТРОЙКИ','m5':'  M5STICKC PLUS2'}[self.page],ACCENT,True))
             print()
             for i,(label,action) in enumerate(self.entries()):
                 focus = i == self.selected[self.page]
@@ -237,6 +249,8 @@ class ControlCenter:
                 ('Voice Clarity','установлен' if available_voice() else 'не установлен'),
                 ('Режим R89','установлен' if available_speed() else 'не установлен'),
                 ('Прошивка','есть · '+datetime.fromtimestamp(firmware.stat().st_mtime).strftime('%d.%m %H:%M') if firmware.is_file() else 'не найдена'),
+                ('Версия NEXUS',(CFG/'installed_version').read_text(encoding='utf-8').strip() if (CFG/'installed_version').is_file() else 'неизвестна'),
+                ('Wi-Fi M5',m5._value('NEXUS_WIFI_SSID') or 'не настроен'),
             ]
             for key,val in info:
                 print('  '+c(key+': ',MUTED)+crop(val,max(14,w-width(key)-6)))
@@ -249,7 +263,9 @@ class ControlCenter:
         tee=Tee(sys.stdout)
         try:
             with contextlib.redirect_stdout(tee):
-                fn()
+                result = fn()
+                if result is False:
+                    raise RuntimeError('Операция отменена или не завершена')
             lines=[sanitise(v.strip()) for v in tee.getvalue().splitlines() if v.strip()]
             self.flash='Готово' if sensitive else (lines[-1][:200] if lines else 'Готово')
         except (EOFError,KeyboardInterrupt):
@@ -260,6 +276,18 @@ class ControlCenter:
 
     def handle(self, action):
         if action=='settings': self.page='settings';self.flash='';return
+        if action=='m5': self.page='m5';self.flash='';return
+        if action=='m5-status': self.popup(m5.status);return
+        if action=='m5-wifi': self.popup(m5.wifi,sensitive=True);return
+        if action=='m5-build': self.popup(m5.build);return
+        if action=='m5-flash': self.popup(m5.flash);return
+        if action=='m5-build-flash': self.popup(m5.build_flash);return
+        if action=='update':
+            def run_update():
+                code = subprocess.run([sys.executable,str(ROOT/'nexus_update.py')],check=False).returncode
+                if code: raise RuntimeError('Обновление не удалось. Проверь вывод выше')
+                print('Готово. Для нового интерфейса перезапусти меню nexus.')
+            self.popup(run_update);return
         if action=='logs': self.page='logs';self.flash='';return
         if action=='diagnostics': self.page='diagnostics';self.flash='';return
         if action=='toggle':
@@ -301,7 +329,7 @@ class ControlCenter:
                     if self.page=='home': return
                     self.page='home'; self.flash='';continue
                 if key=='r': self.cache_until=0;continue
-                if self.page not in ('home','settings'): continue
+                if self.page not in ('home','settings','m5'): continue
                 entries=self.entries()
                 selection=self.selected[self.page]
                 if key in ('down','j'):
