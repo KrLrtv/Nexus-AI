@@ -49,5 +49,4 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "NEXUS AI v0.1.0-alpha" \
             --notes-file RELEASE_NOTES.md \
-            --prerelease \
-            --verify-tag
+            --prerelease
