@@ -1,11 +1,11 @@
-name: Publish NEXUS 2.0 Skill Forge Cycle preview
+name: Publish NEXUS automatic learning preview
 on:
   push:
-    branches: [feature/nexus-2-learning-cycle]
+    branches: [feature/nexus-auto-answer]
 permissions:
   contents: write
 concurrency:
-  group: nexus-2-preview
+  group: nexus-auto-answer-preview
   cancel-in-progress: false
 jobs:
   publish-preview:
@@ -13,9 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate Python and Termux shell scripts
+        with:
+          ref: ${{ github.ref }}
+      - name: Apply hash-checked integration
+        run: python scripts/integrate_auto_answer.py
+      - name: Validate all sources
         run: |
           set -euo pipefail
+          git diff --check
           bash -n install.sh scripts/termux-install.sh
           python scripts/check_release_consistency.py
           python scripts/check_public_source.py
@@ -25,21 +30,32 @@ jobs:
           for path in Path('nexus-ai').rglob('*.py'):
               ast.parse(path.read_text(encoding='utf-8-sig'), filename=str(path))
           PY
-      - name: Run all existing and new offline regression tests
+      - name: Run full existing and automatic-learning tests
         run: python -m unittest discover -s nexus-ai/tests -p 'test_*.py' -v
-      - name: Publish isolated pre-release
+      - name: Commit tested source integration and publish preview
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          TAG='v2.0.4-alpha'
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Preview already exists; immutable historical tag preserved."
-            exit 0
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add nexus-ai/android_bridge/skill_academy.py nexus-ai/nexus_tui.py \
+            nexus-ai/tests/test_skill_academy.py nexus-ai/tests/test_termux_menu.py
+          if ! git diff --cached --quiet; then
+            git commit -m 'feat(learning): integrate tested automatic activation and immediate answers'
+            git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
-          gh release create "$TAG" \
-            --target "$GITHUB_SHA" \
-            --title "NEXUS AI v2.0.4-alpha — Skill Forge Cycle" \
-            --notes-file V2_RELEASE_NOTES.md \
-            --prerelease
+          TAG='v2.0.5-alpha'
+          SHA="$(git rev-parse HEAD)"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            git fetch origin "refs/tags/$TAG:refs/tags/$TAG"
+            test "$(git rev-parse "$TAG^{commit}")" = "$SHA" || {
+              echo 'Release tag already points elsewhere; refusing to overwrite.' >&2
+              exit 1
+            }
+          else
+            gh release create "$TAG" --target "$SHA" \
+              --title 'NEXUS AI v2.0.5-alpha — Auto Learn & Answer' \
+              --notes-file V2_RELEASE_NOTES.md --prerelease
+          fi
