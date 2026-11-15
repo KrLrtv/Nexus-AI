@@ -584,10 +584,10 @@ class ControlCenter:
                 if key=='q': return
                 if key in ('0','back','h'):
                     if self.page=='home': return
-                    self.page='learn' if self.page in ('learning-list','learn-manage') else 'home'
+                    self.page='learn' if self.page in ('learning-list','learn-manage','skills') else 'home'
                     self.flash='';continue
                 if key=='r': self.cache_until=0;continue
-                if self.page not in ('home','settings','m5','learn','versions','learn-manage'): continue
+                if self.page not in ('home','settings','m5','learn','versions','learn-manage','skills'): continue
                 entries=self.entries()
                 selection=self.selected[self.page]
                 if key in ('down','j'):
