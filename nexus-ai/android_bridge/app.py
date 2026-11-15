@@ -12,6 +12,7 @@ from agent import execute, recognize, recent_dialog, save_dialog, REQUIRES_APPRO
 from planner import plan
 from reminder_clock import worker as reminder_worker, listing as reminder_listing
 from memory import recall as memory_recall
+from learning20 import handle_command as _learning20_handle, STORE as _learning20_store
 from core10 import permission,set_permission,goals,graph_search,logs,get_events,ack_events,enqueue,log
 from gestures import train, configure, match, SAFE_GESTURE_ACTIONS
 import nexus_runtime_settings as nexus_settings  # NEXUS_R8_SETTINGS
@@ -162,6 +163,21 @@ def event():
 def process_text(text,event='text'):
     text=text.strip()[:3000]  # NEXUS_R86_PTT_10SEC
     if not text:return {'error':'Пустой запрос'},400
+    # NEXUS 2.0 local learning: process explicit owner commands BEFORE any
+    # cloud call. Do not save these commands to dialog history, otherwise
+    # memories could leak into future Gemini history even when sharing is OFF.
+    try:
+        learning_command = _learning20_handle(text, recent_dialog())
+    except Exception:
+        app.logger.exception('NEXUS 2.0 local learning error')
+        message = 'Ошибка локальной базы обучения NEXUS.'
+        publish(message,'ERROR',event)
+        return {'error':message},503
+    if learning_command is not None:
+        reply, ok = learning_command
+        publish(reply, 'LEARN' if ok else 'ERROR', event)
+        return {'reply':reply, 'provider':'NEXUS-2-Local',
+                'actions':[], 'pending':False}, 200 if ok else 400
     settings_command=nexus_settings.handle_voice(text)
     if settings_command is not None:
         reply,ok=settings_command
@@ -198,6 +214,16 @@ def process_text(text,event='text'):
                  'actions':[{'name':'extension_activate','result':_nexus_r893_message}]}, _nexus_r893_status
     if text.lower() in ('стоп','остановись','отмена'):
         cancel_all();publish('Остановлено','STOPPED',event);return {'reply':'Остановлено'},200
+    # The owner's exact correction to a read-only question can be answered
+    # locally without an API call. Never apply a cached correction to tool
+    # or device-changing requests.
+    if _nexus_is_fast_info(text):
+        corrected = _learning20_store.corrected_answer(text)
+        if corrected:
+            reply = 'По твоему исправлению: ' + corrected[:1000]
+            publish(reply,'ANSWER via NEXUS 2.0 Memory',event)
+            return {'reply':reply,'provider':'NEXUS-2-Local',
+                    'actions':[], 'pending':False},200
     # NEXUS_R85_QUICK_RESPONSE: strictly read-only local responses; never run
     # permission, shell, plugin, or device-changing commands on this path.
     _nexus_local_answer=_nexus_local_reply(text)
@@ -247,6 +273,10 @@ def process_text(text,event='text'):
 def local_info(kind):
     local_only()
     if kind=='memory':return jsonify(text=memory_recall())
+    if kind=='learning':
+        records = _learning20_store.list_facts(12)
+        return jsonify(text=('\n'.join(f"{x['id']}. {x['text']}" for x in records)
+                             if records else 'Новых воспоминаний пока нет.'))
     if kind=='reminders':return jsonify(text=reminder_listing())
     return jsonify(error='unknown'),404
 

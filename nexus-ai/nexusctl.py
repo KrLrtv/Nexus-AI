@@ -215,6 +215,9 @@ def menu():
         try:input('\n↵ Enter — вернуться в меню...')
         except (KeyboardInterrupt,EOFError):print();return
 if __name__=='__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == 'learn':
+        from nexus_learning import main as learning_cli
+        raise SystemExit(learning_cli(sys.argv[2:]))
     aliases={'start':start,'stop':stop,'restart':lambda:(stop(),start()),'status':status,'test':test,'key':lambda:change_key('gemini'),
              'model':change_model,'logs':logs}
     if len(sys.argv)>1:

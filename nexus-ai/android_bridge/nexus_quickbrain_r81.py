@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import re
 from ai_provider import post_json, ProviderError, SYSTEM
+from learning20 import STORE as _learning20_store
 import http.client as _nexus_http
 import ssl as _nexus_ssl
 import time as _nexus_time
@@ -68,7 +69,7 @@ def ask_fast(query: str, history: list) -> str:
     if model.startswith(('gemini-3.1-flash-lite','gemini-3.5-flash-lite')):
         config['thinkingConfig'] = {'thinkingLevel':'minimal'}
     payload = {
-        'systemInstruction': {'parts':[{'text': SYSTEM +
+        'systemInstruction': {'parts':[{'text': SYSTEM + _learning20_store.safe_context_for(query) +
             ' Отвечай на вопрос кратко, на русском, 1–3 предложения. '
             'Не вызывай инструменты, не выполняй действий, не выдумывай актуальные факты.'}]},
         'contents':contents,
