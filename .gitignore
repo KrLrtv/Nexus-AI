@@ -36,3 +36,4 @@
 **/device_secrets.h
 **/local_config.h
 **/.DS_Store
+**/config_local.h
