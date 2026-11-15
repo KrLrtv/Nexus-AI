@@ -128,7 +128,7 @@ def _build_payload(query: str, history: list, model: str) -> dict:
     generation = {'maxOutputTokens': 220, 'temperature': 0.35}
     if model.startswith(('gemini-3.1-flash-lite', 'gemini-3.5-flash-lite')):
         generation['thinkingConfig'] = {'thinkingLevel': 'minimal'}
-    return {'systemInstruction': {'parts': [{'text': SYSTEM + _learning20_store.context_for(query) +
+    return {'systemInstruction': {'parts': [{'text': SYSTEM + _learning20_store.safe_context_for(query) +
         ' Отвечай кратко на русском (1–3 предложения). Не выполняй действий, '
         'не утверждай об использовании инструментов и не выдумывай актуальные сведения.'}]},
         'contents': contents, 'generationConfig': generation}
