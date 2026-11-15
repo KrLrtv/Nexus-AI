@@ -1,0 +1,35 @@
+name: NEXUS source checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check shell scripts
+        run: bash -n install.sh scripts/termux-install.sh
+      - name: Check source presence and Python syntax
+        run: |
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          required = [
+              'nexus-ai/nexusctl.py',
+              'nexus-ai/android_bridge/app.py',
+              'nexus-ai/android_bridge/planner.py',
+              'nexus-ai/android_bridge/supervisor.py',
+              'nexus-firmware/firmware/platformio.ini',
+              'nexus-firmware/firmware/src/main.cpp',
+          ]
+          missing = [x for x in required if not Path(x).is_file()]
+          if missing:
+              print("Sources not yet published:", ", ".join(missing))
+              raise SystemExit(1)
+          for p in Path('nexus-ai').rglob('*.py'):
+              ast.parse(p.read_text(encoding='utf-8-sig'), filename=str(p))
+          print("Source syntax OK")
+          PY
