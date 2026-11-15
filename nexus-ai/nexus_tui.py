@@ -25,6 +25,8 @@ sys.path.insert(0, str(ROOT))
 import nexusctl as engine
 import nexus_device as m5
 import nexus_update as releases
+sys.path.insert(0, str(ROOT / 'android_bridge'))
+from learning20 import STORE as learning_store
 
 CFG = Path.home() / '.config' / 'nexus'
 LOG = Path.home() / 'nexus-ai.log'
@@ -142,7 +144,8 @@ class Tee(io.TextIOBase):
 class ControlCenter:
     def __init__(self):
         self.page = 'home'
-        self.selected = {'home':0,'settings':0,'m5':0}
+        self.selected = {'home':0,'settings':0,'m5':0,'learn':0}
+        self.learning_filter = ''
         self.flash = ''
         self.flash_error = False
         self.cache_until = 0.0
@@ -166,6 +169,7 @@ class ControlCenter:
                 ('Перезапустить NEXUS','restart'),
                 ('M5StickC Plus2 · Wi-Fi и прошивка','m5'),
                 ('Настройки AI и голоса','settings'),
+                ('Самообучение · NEXUS 2.0','learn'),
                 ('Обновить NEXUS из GitHub','update'),
                 ('Откатить обновление NEXUS','rollback'),
                 ('Журнал событий','logs'),
@@ -178,6 +182,16 @@ class ControlCenter:
                 ('Собрать прошивку (без записи)','m5-build'),
                 ('Прошить собранную версию','m5-flash'),
                 ('Собрать и прошить M5','m5-build-flash'),
+            ]
+        if self.page == 'learn':
+            shared = learning_store.sharing()
+            return [
+                ('Состояние обучения','learn-stats'),
+                ('Воспоминания · список','learn-list'),
+                ('Найти в памяти','learn-search'),
+                ('Gemini: передавать память · '+('ДА' if shared else 'НЕТ'),'learn-toggle'),
+                ('Удалить запись по ID','learn-forget'),
+                ('Очистить всю память · подтверждение','learn-clear'),
             ]
         if self.page == 'settings':
             voice = read_mode('voice_clarity_mode','clear', {'clear','original'})
@@ -210,8 +224,8 @@ class ControlCenter:
         except Exception: model = 'не определена'
         self.line('Модель: '+model,w)
         print()
-        if self.page in ('home','settings','m5'):
-            print(c({'home':'  ГЛАВНАЯ','settings':'  НАСТРОЙКИ','m5':'  M5STICKC PLUS2'}[self.page],ACCENT,True))
+        if self.page in ('home','settings','m5','learn'):
+            print(c({'home':'  ГЛАВНАЯ','settings':'  НАСТРОЙКИ','m5':'  M5STICKC PLUS2','learn':'  ОБУЧЕНИЕ 2.0'}[self.page],ACCENT,True))
             print()
             for i,(label,action) in enumerate(self.entries()):
                 focus = i == self.selected[self.page]
@@ -225,6 +239,19 @@ class ControlCenter:
             else:
                 print(c('  ↑↓ выбор · Enter действие',MUTED))
             print(c('  '+crop('1–9 быстро · 0 назад/выход · R обновить',w-4),MUTED))
+        elif self.page=='learning-list':
+            print(c('  ЛОКАЛЬНАЯ ПАМЯТЬ 2.0',ACCENT,True))
+            print()
+            if self.learning_filter:
+                records=learning_store.recall(self.learning_filter,limit=12)
+            else:
+                records=learning_store.list_facts(12)
+            if not records:
+                self.line('Нет подходящих записей',w)
+            for rec in records:
+                self.line(str(rec['id'])+' · '+rec['text'],w,'38;2;221;229;242')
+            print()
+            self.line('0 назад · R обновить · Q выход',w)
         elif self.page=='logs':
             print(c('  ЖУРНАЛ СОБЫТИЙ',ACCENT,True))
             print()
@@ -287,6 +314,47 @@ class ControlCenter:
 
     def handle(self, action):
         if action=='settings': self.page='settings';self.flash='';return
+        if action=='learn': self.page='learn';self.flash='';return
+        if action=='learn-stats':
+            def learn_stats():
+                data=learning_store.stats()
+                print('Воспоминаний:',data['facts'])
+                print('Оценок ответов:',data['feedback'])
+                print('Исправлений:',data['corrections'])
+                print('Облачная персонализация:', 'включена' if data['cloud_personalization'] else 'выключена')
+            self.popup(learn_stats);return
+        if action=='learn-list':
+            self.learning_filter='';self.page='learning-list';self.flash='';return
+        if action=='learn-search':
+            try: self.learning_filter=input('Что найти в памяти: ').strip()[:150]
+            except (EOFError,KeyboardInterrupt):self.flash='Поиск отменён';return
+            self.page='learning-list';self.flash='';return
+        if action=='learn-toggle':
+            def toggle_learning():
+                enabled=not learning_store.sharing()
+                learning_store.set_sharing(enabled)
+                print('Передача релевантных воспоминаний в Gemini:', 'ВКЛ' if enabled else 'ВЫКЛ')
+            self.popup(toggle_learning);return
+        if action=='learn-forget':
+            def forget_memory():
+                raw=input('ID записи для удаления (Enter = отмена): ').strip()
+                if not raw:return False
+                if not raw.isdecimal():print('Нужен номер записи.');return False
+                if learning_store.forget(int(raw)):
+                    print('Запись удалена.')
+                    return True
+                print('Запись не найдена.')
+                return False
+            self.popup(forget_memory);return
+        if action=='learn-clear':
+            def clear_learning():
+                if input('Очистить ВСЮ память NEXUS 2.0? Напиши УДАЛИТЬ: ').strip() != 'УДАЛИТЬ':
+                    print('Очистка отменена.')
+                    return False
+                learning_store.clear_all()
+                print('Локальная память NEXUS 2.0 очищена.')
+                return True
+            self.popup(clear_learning);return
         if action=='m5': self.page='m5';self.flash='';return
         if action=='m5-status': self.popup(m5.status);return
         if action=='m5-wifi': self.popup(m5.wifi,sensitive=True);return
@@ -344,9 +412,10 @@ class ControlCenter:
                 if key=='q': return
                 if key in ('0','back','h'):
                     if self.page=='home': return
-                    self.page='home'; self.flash='';continue
+                    self.page='learn' if self.page=='learning-list' else 'home'
+                    self.flash='';continue
                 if key=='r': self.cache_until=0;continue
-                if self.page not in ('home','settings','m5'): continue
+                if self.page not in ('home','settings','m5','learn'): continue
                 entries=self.entries()
                 selection=self.selected[self.page]
                 if key in ('down','j'):
