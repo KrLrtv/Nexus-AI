@@ -23,6 +23,8 @@ jobs:
           PY
       - name: Shell syntax
         run: bash -n install.sh scripts/termux-install.sh
+      - name: Check release version consistency
+        run: python scripts/check_release_consistency.py
       - name: Offline Termux helper tests
         run: python -m unittest discover -s nexus-ai/tests -p 'test_*.py' -v
       - name: Public-source secret audit
