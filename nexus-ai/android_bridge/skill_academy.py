@@ -254,35 +254,23 @@ def _resolve(session):
             "Инструмент отправки SMS доступен. Какой текст отправить?")
 
 def _learn(goal):
-    if goal["kind"]=="sms":
-        _start(goal["id"],goal["recipient"])
-        ses=_active()
-        return _resolve(ses)
-    # NEXUS 2.2: real capability acquisition is staged, not blindly executed.
-    # Gemini may DESIGN a restricted pure-function or read-only recipe which
-    # is independently checked and dry-run tested by trusted code. Only the
-    # owner may activate a passing skill in the Termux menu.
-    #
-    # Source code for missing Android/M5 capabilities is a draft for REVIEW;
-    # no arbitrary downloaded/generated Python or C++ ever runs on the phone.
+    # NEXUS_AUTO_ANSWER_V205
+    if goal["kind"] == "sms":
+        _start(goal["id"], goal["recipient"])
+        return _resolve(_active())
     try:
-        from skill_forge import propose
-        draft=propose(goal["intent"])
+        from skill_autolearn import learn_and_answer
+        result = learn_and_answer(goal["intent"])
     except Exception:
         return ("Сохранил задачу, но сейчас не могу подготовить проверенный модуль. "
                 "Проверь Gemini и соединение, затем скажи «научись» ещё раз.")
-    if draft["state"]=="tested":
-        report=draft["report"]
-        passed=sum(bool(x.get("passed")) for x in report["checks"])
-        return (f"Создал навык #{draft['id']} «{draft['name']}». "
-                f"Проверил его: {passed} проверок пройдено. "
-                "Для включения открой NEXUS → Самообучение → Новые навыки → "
-                "Лаборатория модулей → Одобрить. После этого смогу применить его "
-                "к исходной задаче.")
-    return (f"Подготовил исходники модуля #{draft['id']} «{draft['name']}». "
-            "Это пока черновик, а не работающая функция. Код не запускался. "
-            "Он доступен для просмотра и повторной проверки через меню "
-            "Самообучение → Новые навыки → Лаборатория модулей.")
+    if result.active:
+        with LOCK:
+            with _connect() as c:
+                c.execute("UPDATE skill_goals SET status='learned' WHERE id=?",
+                          (goal["id"],))
+        return result.reply
+    return "Сохранил задачу. " + result.reply
 
 def _process_session(session,txt):
     normed=norm(txt)

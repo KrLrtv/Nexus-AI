@@ -158,6 +158,7 @@ class SmsLearningTest(unittest.TestCase):
 
 
 class GeneralLearningTest(unittest.TestCase):
+    # NEXUS_AUTO_ANSWER_V205
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory()
         self.patcher=patch.object(academy,"DB_PATH",Path(self.tmp.name)/"skills.sqlite3")
@@ -167,52 +168,42 @@ class GeneralLearningTest(unittest.TestCase):
         self.patcher.stop()
         self.tmp.cleanup()
 
-    def test_cloud_refusal_then_staged_skill_needs_owner_approval(self):
-        self.assertTrue(academy.note_refusal("Проверь состояние батареи",
-                                            "Не могу проверить сейчас."))
-        fake_forge=types.SimpleNamespace(
-            propose=lambda intent:{
-                "id":17,"name":"show_battery","state":"tested",
-                "report":{"checks":[{"test":"dry_run","passed":True}]}},
-            run_intent=lambda intent:None)
-        with patch.dict(sys.modules,{"skill_forge":fake_forge}):
-            result=academy.handle("научись")
-        self.assertIn("Создал навык #17",result)
-        self.assertIn("Для включения",result)
-        # The proposed capability is NOT automatically activated.
-        self.assertEqual(academy.skills(),[])
+    def test_cloud_refusal_then_automatic_skill_returns_answer(self):
+        self.assertTrue(academy.note_refusal("Проверь состояние батареи", "Не могу проверить сейчас."))
+        result=types.SimpleNamespace(active=True, reply="Научился. Навык #17 включён автоматически. Заряд: 75%")
+        fake=types.SimpleNamespace(learn_and_answer=lambda intent:result)
+        with patch.dict(sys.modules,{"skill_autolearn":fake}):
+            reply=academy.handle("научись")
+        self.assertIn("75%",reply)
+        self.assertNotIn("Для включения",reply)
+        self.assertIsNone(academy.pending_goal())
 
     def test_unknown_skill_is_not_falsely_claimed(self):
-        self.assertTrue(academy.note_refusal("Измени прошивку",
-                                            "Не могу перепрошивать устройства."))
-        fake_forge=types.SimpleNamespace(
-            propose=lambda text:{
-                "id":19,"name":"m5_patch","state":"review",
-                "report":{"checks":[{"test":"cpp_not_compiled","passed":False}]}})
-        with patch.dict(sys.modules,{"skill_forge":fake_forge}):
-            result=academy.handle("научись")
-        self.assertIn("черновик",result)
-        self.assertIn("не запускался",result)
+        self.assertTrue(academy.note_refusal("Измени прошивку", "Не могу перепрошивать устройства."))
+        result=types.SimpleNamespace(active=False, reply="Создан черновик. Код не запускался.")
+        fake=types.SimpleNamespace(learn_and_answer=lambda intent:result)
+        with patch.dict(sys.modules,{"skill_autolearn":fake}):
+            reply=academy.handle("научись")
+        self.assertIn("черновик",reply)
+        self.assertIn("не запускался",reply)
+        self.assertIsNotNone(academy.pending_goal())
         self.assertEqual(academy.skills(),[])
 
     def test_learning_from_dialog_without_old_skill_record(self):
-        history=[("user","Создай новый аппаратный режим"),
-                 ("assistant","Не могу сделать это сейчас.")]
-        fake_forge=types.SimpleNamespace(
-            propose=lambda text:{
-                "id":22,"name":"m5_hardware","state":"review",
-                "report":{"errors":["требуется ревью"]}})
-        with patch.dict(sys.modules,{"skill_forge":fake_forge}):
-            result=academy.handle("научись",history)
-        self.assertIn("черновик",result)
+        history=[("user","Создай новый аппаратный режим"), ("assistant","Не могу сделать это сейчас.")]
+        result=types.SimpleNamespace(active=False, reply="Создан черновик, требуется ревью.")
+        fake=types.SimpleNamespace(learn_and_answer=lambda intent:result)
+        with patch.dict(sys.modules,{"skill_autolearn":fake}):
+            reply=academy.handle("научись",history)
+        self.assertIn("черновик",reply)
+        self.assertIsNotNone(academy.pending_goal())
 
     def test_when_gemini_is_unavailable_goal_is_preserved(self):
         academy.note_refusal("Запусти неизвестный модуль","Не могу это сделать.")
-        fake_forge=types.SimpleNamespace(propose=lambda intent:(_ for _ in ()).throw(
-            RuntimeError("network unavailable")))
-        with patch.dict(sys.modules,{"skill_forge":fake_forge}):
-            result=academy.handle("научись")
-        self.assertIn("Сохранил задачу",result)
+        fake=types.SimpleNamespace(learn_and_answer=lambda intent:(_ for _ in ()).throw(RuntimeError("network unavailable")))
+        with patch.dict(sys.modules,{"skill_autolearn":fake}):
+            reply=academy.handle("научись")
+        self.assertIn("Сохранил задачу",reply)
         self.assertIsNotNone(academy.pending_goal())
 
 

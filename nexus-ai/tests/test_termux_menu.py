@@ -359,16 +359,19 @@ class MenuOnlyWorkflowTest(unittest.TestCase):
         self.assertFalse(screen.flash_error)
 
     def test_create_skill_through_menu_not_cli(self):
+        # NEXUS_AUTO_ANSWER_V205
         screen,tui=self._ui()
-        fake=types.SimpleNamespace(propose=lambda intent:{
-            "id":44,"name":"learning_module","summary":"Безопасный пример",
-            "state":"tested","report":{"checks":[{"test":"dry_run","passed":True}]}
-        })
-        with patch.object(tui,"forge",fake),\
-             patch("builtins.input",return_value="Сделай пример навыка"),\
-             patch("sys.stdout",io.StringIO()):
+        calls=[]
+        result=types.SimpleNamespace(active=True, reply="Навык #44 включён автоматически. Ответ: HELLO")
+        fake=types.SimpleNamespace(learn_and_answer=lambda intent:calls.append(intent) or result)
+        with patch.dict(sys.modules,{"skill_autolearn":fake}), \
+             patch("builtins.input",return_value="Регистр: hello") as input_call, \
+             patch("sys.stdout",io.StringIO()) as out:
             screen.handle("forge-create")
         self.assertFalse(screen.flash_error)
+        self.assertEqual(calls,["Регистр: hello"])
+        self.assertEqual(input_call.call_count,1)
+        self.assertIn("HELLO",out.getvalue())
 
     def test_skill_setup_declined_without_package_install(self):
         screen,tui=self._ui()
