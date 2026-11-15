@@ -45,9 +45,13 @@ jobs:
           PYTHONPATH=nexus-ai/android_bridge python - <<'PY' | tee /tmp/nexus-v2.0.7-https.txt
           import json
           from source_http import fetch
-          doc = fetch('https://api.github.com/repos/KrLrtv/Nexus-AI')
-          assert json.loads(doc.body)['full_name'] == 'KrLrtv/Nexus-AI'
+          # The unauthenticated API returned 403 on a shared runner. Test the
+          # same HTTPS boundary using a public, version-pinned source file.
+          url = 'https://raw.githubusercontent.com/KrLrtv/Nexus-AI/v2.0.6-alpha/releases/preview.json'
+          doc = fetch(url)
+          assert json.loads(doc.body)['repository'] == 'KrLrtv/Nexus-AI'
           print('Live public HTTPS transport: OK; pinned DNS, verified TLS, parsed JSON.')
+          print('Source:', url)
           print('Retrieved:', doc.retrieved_at, 'SHA256:', doc.digest)
           print('Live Gemini, Android and M5 were NOT tested.')
           PY
