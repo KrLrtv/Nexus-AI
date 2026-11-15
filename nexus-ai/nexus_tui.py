@@ -29,6 +29,7 @@ import nexus_autostart as shell_startup
 sys.path.insert(0, str(ROOT / 'android_bridge'))
 from learning20 import STORE as learning_store, previous_exchange as learning_previous_exchange
 import skill_academy as academy
+import skill_studio as studio
 
 CFG = Path.home() / '.config' / 'nexus'
 LOG = Path.home() / 'nexus-ai.log'
@@ -219,6 +220,9 @@ class ControlCenter:
                 ('Последняя невыполненная задача','skills-pending'),
                 ('Попробовать научиться сейчас','skills-learn'),
                 ('Очистить незавершённые задачи','skills-clear'),
+                ('Проекты новых модулей','studio-list'),
+                ('Проверить / включить модуль','studio-review'),
+                ('Спроектировать модуль','studio-create'),
             ]
         if self.page == 'learn-manage':
             return [
@@ -405,6 +409,71 @@ class ControlCenter:
                 print(academy.prepare_sms(install=install))
                 return True
             self.popup(skills_prepare);return
+        if action=='studio-list':
+            def show_modules():
+                entries=studio.listing()
+                if not entries: print('Проектов пока нет. Скажи «научись» после отказа NEXUS.')
+                for item in entries:
+                    print('#'+str(item['id'])+' '+(item['name'] or item['task'][:35])+
+                          ' · '+item['status']+' · '+item['reason'][:75])
+            self.popup(show_modules);return
+        if action=='studio-create':
+            def generate_module():
+                goal=input('Какую новую текстовую функцию освоить (Enter = отмена): ').strip()
+                if not goal:return False
+                print('Проектирую модуль и проверяю тесты...')
+                draft=studio.propose(goal)
+                print('Проект #'+str(draft['id'])+': '+draft['status'])
+                if draft['status']=='tested':
+                    passed=sum(1 for t in draft['report'] if t['passed'])
+                    print('Тесты:',passed,'/',len(draft['report']))
+                    print('Можно проверить код и включить модуль отдельным действием.')
+                else:
+                    print('Причина:',draft['reason'])
+                return draft['status']=='tested'
+            self.popup(generate_module);return
+        if action=='studio-review':
+            def review_module():
+                raw=input('Номер проекта (ID, Enter = отмена): ').strip()
+                if not raw.isdecimal():return False
+                draft=studio.get(int(raw))
+                if not draft:
+                    print('Проект не найден.')
+                    return False
+                print('Проект #'+str(draft['id'])+': '+draft['name']+' · '+draft['status'])
+                print('Задача:',draft['task'])
+                if draft['reason']:print('Причина:',draft['reason'])
+                if draft['spec']:
+                    print('Описание:',draft['spec']['description'])
+                    print('Действия (только текст):')
+                    for step in draft['spec']['steps']:
+                        print(' ',step)
+                    print('Результаты тестов:')
+                    for test in draft['report']:
+                        print(' ','✓' if test['passed'] else '✗',
+                              'вход=',repr(test['input'][:80]),
+                              'ожидалось=',repr(test['expected'][:80]),
+                              'получено=',repr(test['actual'][:80]))
+                    print('SHA-256 исходного файла:',draft['sha256'][:20])
+                if draft['status']=='tested':
+                    confirm=input('Все тесты пройдены. Включить навык? Напиши ВКЛЮЧИТЬ: ').strip()
+                    if confirm!='ВКЛЮЧИТЬ':
+                        print('Навык остался выключенным.')
+                        return True
+                    ok,message=studio.approve(draft['id'])
+                    print(message)
+                    return ok
+                if draft['status']=='active':
+                    confirm=input('Отключить активный навык? Напиши ОТКЛЮЧИТЬ: ').strip()
+                    if confirm!='ОТКЛЮЧИТЬ':
+                        print('Навык продолжает работать.')
+                        return True
+                    ok=studio.disable(draft['id'])
+                    print('Навык отключён.' if ok else 'Не удалось отключить.')
+                    return ok
+                print('Этот проект нельзя включить: нужен адаптер или исправление тестов.')
+                return True
+            self.popup(review_module,sensitive=True);return
         if action=='skills-clear':
             def skills_clear():
                 if input('Удалить незавершённые задачи обучения? Напиши УДАЛИТЬ: ').strip()!='УДАЛИТЬ':
