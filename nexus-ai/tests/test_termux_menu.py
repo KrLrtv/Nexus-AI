@@ -309,8 +309,39 @@ class MenuOnlyWorkflowTest(unittest.TestCase):
         self.assertEqual(screen.page,"skills")
         actions={a for _,a in screen.entries()}
         self.assertTrue({"skills-status","skills-prepare","skills-list",
-                         "skills-pending","skills-learn","skills-clear"}.issubset(actions))
-        self.assertLessEqual(len(screen.entries()),9)
+                         "skills-pending","skills-learn","skills-clear",
+                         "studio-list","studio-review","studio-create"}.issubset(actions))
+        self.assertEqual(len(screen.entries()),9)
+
+    def test_reviewed_module_is_not_enabled_without_explicit_confirmation(self):
+        screen,tui=self._ui()
+        proposal={"id":3,"task":"make uppercase","name":"text_upper",
+                  "status":"tested","spec":{"description":"Uppercase",
+                  "steps":[{"op":"upper"}]},
+                  "reason":"","report":[{"passed":True,"input":"a","expected":"A","actual":"A"}],
+                  "sha256":"123456789abcdef"}
+        with patch.object(tui.studio,"get",return_value=proposal), \
+             patch.object(tui.studio,"approve") as approve, \
+             patch("builtins.input",side_effect=["3","нет"]), \
+             patch("sys.stdout",io.StringIO()):
+            screen.handle("studio-review")
+        approve.assert_not_called()
+        self.assertFalse(screen.flash_error)
+
+    def test_owner_can_explicitly_approve_tested_module(self):
+        screen,tui=self._ui()
+        proposal={"id":3,"task":"make uppercase","name":"text_upper",
+                  "status":"tested","spec":{"description":"Uppercase",
+                  "steps":[{"op":"upper"}]},
+                  "reason":"","report":[{"passed":True,"input":"a","expected":"A","actual":"A"}],
+                  "sha256":"123456789abcdef"}
+        with patch.object(tui.studio,"get",return_value=proposal), \
+             patch.object(tui.studio,"approve",return_value=(True,"Enabled")) as approve, \
+             patch("builtins.input",side_effect=["3","ВКЛЮЧИТЬ"]), \
+             patch("sys.stdout",io.StringIO()):
+            screen.handle("studio-review")
+        approve.assert_called_once_with(3)
+        self.assertFalse(screen.flash_error)
 
     def test_skill_setup_declined_without_package_install(self):
         screen,tui=self._ui()
