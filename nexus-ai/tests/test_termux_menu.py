@@ -331,6 +331,7 @@ class UpdateChannelsTest(unittest.TestCase):
         with patch.object(up,"installed_version",return_value="v2.0.0-alpha"):
             with patch.object(up.urllib.request, "urlopen") as fetch:
                 fake = io.BytesIO(b'{"repository":"KrLrtv/Nexus-AI","tag":"v2.0.0-alpha","channel":"preview"}')
+                fake.headers = {}
                 fetch.return_value.__enter__.return_value = fake
                 self.assertEqual(up.target_release(None), "v2.0.0-alpha")
                 args=fetch.call_args[0][0]
@@ -338,6 +339,7 @@ class UpdateChannelsTest(unittest.TestCase):
         with patch.object(up,"installed_version",return_value="v0.1.6-alpha"):
             with patch.object(up.urllib.request, "urlopen") as fetch:
                 fake = io.BytesIO(b'{"repository":"KrLrtv/Nexus-AI","tag":"v0.1.6-alpha","channel":"alpha"}')
+                fake.headers = {}
                 fetch.return_value.__enter__.return_value = fake
                 self.assertEqual(up.target_release(None), "v0.1.6-alpha")
                 self.assertIn("channel.json",fetch.call_args[0][0].full_url)
@@ -345,6 +347,7 @@ class UpdateChannelsTest(unittest.TestCase):
     def test_reject_preview_manifest_pointing_to_stable(self):
         with patch.object(up.urllib.request, "urlopen") as fetch:
             fake=io.BytesIO(b'{"repository":"KrLrtv/Nexus-AI","tag":"v0.1.6-alpha","channel":"preview"}')
+            fake.headers = {}
             fetch.return_value.__enter__.return_value = fake
             with self.assertRaises(ValueError):
                 up.target_release(None,"preview")
