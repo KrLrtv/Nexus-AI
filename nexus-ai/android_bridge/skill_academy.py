@@ -255,39 +255,34 @@ def _resolve(session):
 
 def _learn(goal):
     if goal["kind"]=="sms":
-        session_id=_start(goal["id"],goal["recipient"])
+        _start(goal["id"],goal["recipient"])
         ses=_active()
         return _resolve(ses)
-    # For unknown capabilities, attempt a declarative READ-ONLY recipe. Never
-    # execute arbitrary model-written code or install packages from model output.
+    # NEXUS 2.2: real capability acquisition is staged, not blindly executed.
+    # Gemini may DESIGN a restricted pure-function or read-only recipe which
+    # is independently checked and dry-run tested by trusted code. Only the
+    # owner may activate a passing skill in the Termux menu.
+    #
+    # Source code for missing Android/M5 capabilities is a draft for REVIEW;
+    # no arbitrary downloaded/generated Python or C++ ever runs on the phone.
     try:
-        from extensions import propose
-        proposal=propose(goal["intent"])
+        from skill_forge import propose
+        draft=propose(goal["intent"])
     except Exception:
-        return ("Пока не получилось создать безопасный навык. Я сохранил незавершённую задачу. "
-                "Для новых системных функций нужно разработать и проверить отдельный адаптер.")
-    if proposal.get("status")!="pending":
-        return ("Изучил возможность, но готового безопасного адаптера пока нет: "
-                +str(proposal.get("reason","потребуется разработка"))[:200])
-    ident=proposal["id"]
-    # User explicitly said "научись". Existing extensions only allow bounded
-    # read-only steps; verified again by decide(). Other action types are blocked.
-    from extensions import decide,run
-    result,status_code=decide(ident,True)
-    if status_code!=200:
-        return "Новый навык не прошёл проверку и не был активирован."
-    key="recipe:"+norm(goal["intent"])[:120]
-    _set_skill(key,"learned",{"extension_id":ident})
-    with LOCK:
-        with _connect() as c:
-            c.execute("UPDATE skill_goals SET status='learned' WHERE id=?",(goal["id"],))
-    try:
-        outcome,code=run(ident)
-        return ("Научился выполнять безопасный сценарий. Пробный запуск: "
-                +json.dumps(outcome,ensure_ascii=False)[:550] if code==200
-                else "Навык создан, но его проверочный запуск не удался.")
-    except Exception:
-        return "Безопасный навык создан, но тест пока не прошёл."
+        return ("Сохранил задачу, но сейчас не могу подготовить проверенный модуль. "
+                "Проверь Gemini и соединение, затем скажи «научись» ещё раз.")
+    if draft["state"]=="tested":
+        report=draft["report"]
+        passed=sum(bool(x.get("passed")) for x in report["checks"])
+        return (f"Создал навык #{draft['id']} «{draft['name']}». "
+                f"Проверил его: {passed} проверок пройдено. "
+                "Для включения открой NEXUS → Самообучение → Новые навыки → "
+                "Лаборатория модулей → Одобрить. После этого смогу применить его "
+                "к исходной задаче.")
+    return (f"Подготовил исходники модуля #{draft['id']} «{draft['name']}». "
+            "Это пока черновик, а не работающая функция. Код не запускался. "
+            "Он доступен для просмотра и повторной проверки через меню "
+            "Самообучение → Новые навыки → Лаборатория модулей.")
 
 def _process_session(session,txt):
     normed=norm(txt)
@@ -398,6 +393,15 @@ def handle(text, history=None):
         add_goal("sms",txt,intent["recipient"])
         return ("Сейчас не умею отправлять сообщения этому контакту. "
                 "Скажи «научись» — проверю инструменты Android и попробую настроить SMS.")
+    # Reuse an explicitly approved Skill Forge module on repeated requests.
+    # No generated code execution: safe interpreter or trusted read-only tools.
+    try:
+        from skill_forge import run_intent
+        result=run_intent(txt)
+        if result is not None:
+            return result
+    except Exception:
+        return "Освоенный навык временно недоступен; изменения не выполнялись."
     learned=load_skill("recipe:"+normalized[:120])
     if learned and learned["status"]=="learned":
         try:
