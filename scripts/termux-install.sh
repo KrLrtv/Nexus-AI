@@ -33,6 +33,10 @@ NEXUS AI: чистая установка в Termux из F-Droid.
       исходники android_bridge + прошивку platformio.ini/src/main.cpp).
       Можно передать локальный файл ZIP вместо URL.
 
+  bash NEXUS_FDroid_Clean_v2.sh finish HTTPS_RELEASE_ZIP_URL
+      Закончить прерванную установку: обновить исходники до релиза и
+      восстановить команды nexus, nexus update и nexus-stt без переустановки Ubuntu.
+
   bash NEXUS_FDroid_Clean_v2.sh inspect ZIP_FILE
       Без установки проверить, что ZIP подходит по структуре.
 
@@ -252,6 +256,12 @@ if [[ "$#" -eq 0 ]]; then
 elif [[ "$1" == ui ]]; then
   shift
   exec "$PY" "$HOME/nexus-ai/nexus_tui.py" "$@"
+elif [[ "$1" == update ]]; then
+  shift
+  exec "$PY" "$HOME/nexus-ai/nexus_update.py" "$@"
+elif [[ "$1" == m5 || "$1" == device ]]; then
+  shift
+  exec "$PY" "$HOME/nexus-ai/nexus_device.py" "$@"
 elif [[ "$1" == --legacy ]]; then
   shift
 fi
@@ -302,67 +312,35 @@ EOS
   chmod 700 "$PREFIX/bin/nexus-stt"
 }
 
-configure_m5_firmware() {
-  local file="$HOME/nexus-firmware/firmware/src/config_local.h"
-  [[ ! -f "$file" ]] || { warn 'Существующий config_local.h не изменён.'; return; }
-  info 'Настройка Wi-Fi для прошивки M5StickC Plus2 (необязательно сейчас).'
-  python - <<'PY2'
-from pathlib import Path
-import getpass, json, os, shlex
-home=Path.home(); path=home/'nexus-firmware/firmware/src/config_local.h'
-ssid=input('SSID Wi-Fi 2.4 ГГц (Enter = настроить позже): ').strip()
-if not ssid:
-    print('Wi-Fi не настроен. Для сборки прошивки позже создай src/config_local.h по шаблону config_local.example.h.')
-    raise SystemExit(0)
-password=getpass.getpass('Пароль Wi-Fi (не отображается): ')
-secret_env=home/'.config/nexus/secrets.env'
-token=''
-for line in secret_env.read_text(encoding='utf-8').splitlines():
-    if line.startswith('export NEXUS_DEVICE_TOKEN='):
-        pieces=shlex.split(line[7:])
-        if len(pieces)==1 and pieces[0].startswith('NEXUS_DEVICE_TOKEN='):
-            token=pieces[0].split('=',1)[1]
-if len(token)<16:
-    raise SystemExit('Токен M5StickC не найден или слишком короткий')
-q=lambda x:json.dumps(x,ensure_ascii=False)
-content=('// Local credentials; NEVER commit this file.\\n'
-         '#pragma once\\n'
-         f'#define NEXUS_WIFI_SSID {q(ssid)}\\n'
-         f'#define NEXUS_WIFI_PASSWORD {q(password)}\\n'
-         '#define NEXUS_BRIDGE_URL "AUTO"\\n'
-         f'#define NEXUS_DEVICE_TOKEN {q(token)}\\n')
-with path.open('x',encoding='utf-8') as f:f.write(content.replace('\\n','\n'))
-os.chmod(path,0o600)
-print('Локальная конфигурация ESP32 создана. Значения не показаны и исключены из Git.')
-PY2
-}
-
 configure_first_run() {
-  [[ ! -f "$CFG/secrets.env" ]] || { warn 'Существующий secrets.env не перезаписан.'; return; }
-  info 'Первоначальная настройка. Ключи не выводятся на экран и не записываются в журнал.'
-  python - <<'PY'
+  if [[ -f "$CFG/secrets.env" ]]; then
+    info 'Существующие ключи сохранены.'
+  else
+    info 'Создаю локальный токен M5. API-ключи и Wi-Fi вводятся позже из меню nexus.'
+    # No Python input() or getpass() in a heredoc: stdin there contains program text.
+    python - <<'PY'
 from pathlib import Path
-import os, secrets, shlex, getpass
-cfg=Path.home()/'.config/nexus';cfg.mkdir(parents=True,exist_ok=True);cfg.chmod(0o700)
+import secrets, shlex
+cfg=Path.home()/'.config/nexus'
+cfg.mkdir(parents=True,exist_ok=True)
+cfg.chmod(0o700)
 path=cfg/'secrets.env'
-if path.exists():exit()
-token=getpass.getpass('Токен M5StickC (Enter = создать новый): ').strip() or secrets.token_urlsafe(32)
-gem=getpass.getpass('Ключ Gemini (Enter = настрою позже): ').strip()
-rout=getpass.getpass('Ключ OpenRouter (необязательно): ').strip()
-model='gemini-3.1-flash-lite'
-with path.open('x') as f:
-    for k,v in [('NEXUS_DEVICE_TOKEN',token),('GEMINI_API_KEY',gem),('GEMINI_MODEL',model),('OPENROUTER_API_KEY',rout)]:
-        f.write('export '+k+'='+shlex.quote(v)+'\n')
-path.chmod(0o600)
-print('Секреты сохранены. При новой прошивке токен M5 должен совпадать с этим значением.')
+if not path.exists():
+    token=secrets.token_urlsafe(32)
+    values=[('NEXUS_DEVICE_TOKEN',token),('GEMINI_API_KEY',''),('GEMINI_MODEL','gemini-3.1-flash-lite'),('OPENROUTER_API_KEY','')]
+    with path.open('x',encoding='utf-8') as fd:
+        for k,v in values:
+            fd.write('export '+k+'='+shlex.quote(v)+'\n')
+    path.chmod(0o600)
+    print('Локальный токен создан. Добавь Gemini и Wi-Fi в меню nexus.')
 PY
+  fi
   for mode in 'stt_mode:sherpa' 'voice_clarity_mode:clear' 'speed_mode:balanced'; do
     local key="${mode%%:*}" value="${mode#*:}"
     [[ -f "$CFG/$key" ]] || printf '%s\n' "$value" > "$CFG/$key"
     chmod 600 "$CFG/$key"
   done
 }
-
 run_doctor() {
   info "NEXUS Clean Installer $VERSION: диагностика"
   for bin in pkg python git curl proot-distro tpio nrflash espeak nexus-stt; do
@@ -387,19 +365,23 @@ case "$ACTION" in
     command -v python >/dev/null 2>&1 || die 'Для inspect требуется Python.'
     STAGE="$(mktemp -d)"; extract_release "$2" "$STAGE/unpack"; info 'ZIP содержит оба исходных проекта.'; exit 0;;
   doctor) need_termux; run_doctor; exit 0;;
-  prepare|install) need_termux;;
+  prepare|install|finish) need_termux;;
   *) show_help; die "Неизвестная команда: $ACTION";;
 esac
 
-if [[ "$ACTION" == install ]]; then
-  [[ -n "${2:-}" ]] || { show_help; die 'Для полной установки укажи опубликованный ZIP с исходниками NEXUS. Без исходников невозможно воспроизвести текущую R89.'; }
-  [[ ! -e "$HOME/nexus-ai" && ! -e "$HOME/nexus-firmware" ]] || die 'NEXUS уже установлен: это чистый установщик.'
+if [[ "$ACTION" == install || "$ACTION" == finish ]]; then
+  [[ -n "${2:-}" ]] || { show_help; die 'Укажи URL исходного ZIP релиза.'; }
+  if [[ "$ACTION" == install ]]; then
+    [[ ! -e "$HOME/nexus-ai" && ! -e "$HOME/nexus-firmware" ]] || die 'NEXUS уже установлен: выбери finish для восстановления.'
+  else
+    [[ -f "$HOME/nexus-ai/nexusctl.py" && -f "$HOME/nexus-firmware/firmware/platformio.ini" ]] || die 'Нет исходников для восстановления; нужен install.'
+  fi
 fi
 
 # Avoid logging potentially secret command-line URL query strings; regular release URLs preferred.
 init_log
 STAGE="$(mktemp -d "${TMPDIR:-$PREFIX/tmp}/nexus-fresh-XXXXXX")"
-if [[ "$ACTION" == install ]]; then
+if [[ "$ACTION" == install || "$ACTION" == finish ]]; then
   # A fresh F-Droid Termux has no Python: the ZIP verifier below requires it.
   # Install only this prerequisite before verifying the archive structure.
   if ! command -v python >/dev/null 2>&1; then
@@ -408,9 +390,21 @@ if [[ "$ACTION" == install ]]; then
   fi
   fetch_release "$2" >/dev/null
   extract_release "$STAGE/release.zip" "$STAGE/precheck"
-  rm -rf "$STAGE/precheck"
   info 'Структура ZIP проверена до установки пакетов.'
 fi
+
+if [[ "$ACTION" == finish ]]; then
+  info 'Восстанавливаю прерванную установку, сохраняя все локальные файлы...'
+  make_venv
+  configure_first_run
+  local_app_rel="$(sed -n '1p' "$STAGE/precheck/.nexus-source-paths")"
+  "$HOME/.venvs/nexus/bin/python" "$STAGE/precheck/$local_app_rel/nexus_update.py" --tag "v$VERSION" --archive "$STAGE/release.zip"
+  install_stt_launcher
+  run_doctor
+  info 'Установка восстановлена. Введи nexus и открой раздел M5StickC.'
+  exit 0
+fi
+
 install_termux_packages
 install_flashing_tools
 install_stt
@@ -419,11 +413,13 @@ if [[ "$ACTION" == install ]]; then
   make_venv
   configure_first_run
   install_stt_launcher
-  configure_m5_firmware
+  printf 'v%s\n' "$VERSION" > "$CFG/installed_version"
+  chmod 600 "$CFG/installed_version"
+  info 'Wi-Fi M5StickC и сборка/прошивка доступны из меню nexus.'
   info 'Проверка исходников и окружения...'
   run_doctor
   info 'Готово. Запусти: nexus. Прошивка не выполнялась.'
-  info 'Для сборки и прошивки M5: cd ~/nexus-firmware/firmware && tpio run -e m5stickc_plus2'
+  info 'Настройка Wi-Fi и прошивка: nexus -> M5StickC Plus2.'
 else
   info 'БАЗОВОЕ ОКРУЖЕНИЕ ПОДГОТОВЛЕНО: Ubuntu, STT, eSpeak, PlatformIO, tpio, nrflash.'
   warn 'Сам NEXUS ещё НЕ установлен: нужен опубликованный ZIP с полными исходниками.'
