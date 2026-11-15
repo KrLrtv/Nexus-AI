@@ -194,5 +194,47 @@ class UpdateTest(unittest.TestCase):
             with patch.object(up, "CACHE", Path(d) / ".cache"):
                 self.assertFalse(up.rollback(approve=True))
 
+
+class TuiErrorTest(unittest.TestCase):
+    def _tui(self):
+        # The Termux control center imports nexusctl by its actual installed
+        # path. Stub only this dependency for independent CI testing.
+        engine = types.SimpleNamespace(
+            request_status=lambda: 0,
+            managed_pid=lambda: None,
+            config=lambda: {},
+            MODEL_DEFAULT="gemini-test",
+        )
+        with patch.dict(sys.modules, {
+            "nexusctl": engine,
+            "nexus_device": m5,
+            "nexus_update": up,
+        }):
+            return module("nexus_tui_tests", "nexus_tui.py")
+
+    def test_false_result_shows_real_error_instead_of_runtimeerror(self):
+        tui = self._tui()
+        screen = tui.ControlCenter()
+        def simulated_missing_wifi():
+            print("Wi-Fi M5 не настроен. Выбери пункт 2 для настройки.")
+            return False
+        with patch("sys.stdout", io.StringIO()):
+            screen.popup(simulated_missing_wifi)
+        self.assertEqual(screen.flash,
+                         "Wi-Fi M5 не настроен. Выбери пункт 2 для настройки.")
+        self.assertTrue(screen.flash_error)
+        self.assertNotIn("RuntimeError", screen.flash)
+
+    def test_success_keeps_success_status(self):
+        tui = self._tui()
+        screen = tui.ControlCenter()
+        def simulated_success():
+            print("Сборка завершена")
+            return True
+        with patch("sys.stdout", io.StringIO()):
+            screen.popup(simulated_success)
+        self.assertEqual(screen.flash, "Сборка завершена")
+        self.assertFalse(screen.flash_error)
+
 if __name__ == "__main__":
     unittest.main()

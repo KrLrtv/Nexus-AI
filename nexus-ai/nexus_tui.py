@@ -144,6 +144,7 @@ class ControlCenter:
         self.page = 'home'
         self.selected = {'home':0,'settings':0,'m5':0}
         self.flash = ''
+        self.flash_error = False
         self.cache_until = 0.0
         self.port = False
         self.supervisor = None
@@ -220,7 +221,7 @@ class ControlCenter:
             print()
             print(c('  '+'─'*(w-4),MUTED))
             if self.flash:
-                print(c('  '+crop(sanitise(self.flash),w-4),GREEN))
+                print(c('  '+crop(sanitise(self.flash),w-4),GOLD if self.flash_error else GREEN))
             else:
                 print(c('  ↑↓ выбор · Enter действие',MUTED))
             print(c('  '+crop('1–9 быстро · 0 назад/выход · R обновить',w-4),MUTED))
@@ -267,14 +268,21 @@ class ControlCenter:
         try:
             with contextlib.redirect_stdout(tee):
                 result = fn()
-                if result is False:
-                    raise RuntimeError('Операция отменена или не завершена')
             lines=[sanitise(v.strip()) for v in tee.getvalue().splitlines() if v.strip()]
-            self.flash='Готово' if sensitive else (lines[-1][:200] if lines else 'Готово')
+            if result is False:
+                # Device helpers already print the actual cause (e.g. Wi-Fi
+                # missing, build failed). Never replace it with RuntimeError.
+                self.flash_error=True
+                self.flash=lines[-1][:200] if lines else 'Действие не выполнено'
+            else:
+                self.flash_error=False
+                self.flash='Готово' if sensitive else (lines[-1][:200] if lines else 'Готово')
         except (EOFError,KeyboardInterrupt):
+            self.flash_error=True
             self.flash='Действие отменено'
         except Exception as exc:
-            self.flash='Ошибка: '+type(exc).__name__+': '+str(exc)[:95]
+            self.flash_error=True
+            self.flash=sanitise('Ошибка: '+type(exc).__name__+': '+str(exc)[:140])
         self.cache_until=0
 
     def handle(self, action):
