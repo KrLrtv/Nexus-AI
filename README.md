@@ -1,6 +1,8 @@
+> **NEXUS 2.0.6 Native Learning — предварительный релиз.** Освоение навыков встроено в обычные запросы. Обновление через меню; ограничения и проверка — в `RELEASE_NOTES.md`. Это не новая APK и не универсальное самопрограммирование.
+
 # NEXUS AI · M5StickC Plus2
 
-**Текущий экспериментальный релиз — v0.1.5-alpha.**
+**Текущий экспериментальный релиз — v2.0.6-alpha.**
 
 В этом релизе исправлен запуск `apt-get` во время `tpio setup`: для установки пакетов Ubuntu используется стандартная эмуляция жёстких ссылок PRoot. Прежнее поведение могло давать `dpkg: Permission denied`. Голосовой помощник с M5StickC Plus2, локальным Android-мостом на Termux и облачным NEXUS Brain.
 
@@ -24,7 +26,7 @@
 ```bash
 pkg update -y && pkg install -y curl && \
 curl -fL --retry 3 -o "$HOME/nexus-install.sh" \
-https://raw.githubusercontent.com/KrLrtv/Nexus-AI/v0.1.5-alpha/install.sh && \
+https://raw.githubusercontent.com/KrLrtv/Nexus-AI/v2.0.6-alpha/install.sh && \
 bash "$HOME/nexus-install.sh"
 ```
 
