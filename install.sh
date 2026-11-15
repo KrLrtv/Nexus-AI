@@ -3,7 +3,7 @@
 # Usage: bash install.sh (or download this script from the pinned GitHub release tag).
 set -Eeuo pipefail
 REPO='KrLrtv/Nexus-AI'
-TAG='v2.0.6-alpha'
+TAG='v2.0.7-alpha'
 BASE="https://raw.githubusercontent.com/${REPO}/${TAG}"
 ARCHIVE="https://codeload.github.com/${REPO}/zip/refs/tags/${TAG}"
 

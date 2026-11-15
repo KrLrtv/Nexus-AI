@@ -1,8 +1,13 @@
+<!-- NEXUS_PUBLIC_SOURCE_PREVIEW -->
+# NEXUS AI v2.0.7-alpha — Public Source Learning
+
+Предварительное серверное обновление: самостоятельное изучение публичных источников, проверка реальных ответов и сохранение сценариев. Не универсальное самопрограммирование. См. RELEASE_NOTES.md и docs/NEXUS_PUBLIC_SOURCES.md. Перепрошивка M5 не нужна.
+
 > **NEXUS 2.0.6 Native Learning — предварительный релиз.** Освоение навыков встроено в обычные запросы. Обновление через меню; ограничения и проверка — в `RELEASE_NOTES.md`. Это не новая APK и не универсальное самопрограммирование.
 
 # NEXUS AI · M5StickC Plus2
 
-**Текущий экспериментальный релиз — v2.0.6-alpha.**
+**Текущий экспериментальный релиз — v2.0.7-alpha.**
 
 В этом релизе исправлен запуск `apt-get` во время `tpio setup`: для установки пакетов Ubuntu используется стандартная эмуляция жёстких ссылок PRoot. Прежнее поведение могло давать `dpkg: Permission denied`. Голосовой помощник с M5StickC Plus2, локальным Android-мостом на Termux и облачным NEXUS Brain.
 
@@ -26,7 +31,7 @@
 ```bash
 pkg update -y && pkg install -y curl && \
 curl -fL --retry 3 -o "$HOME/nexus-install.sh" \
-https://raw.githubusercontent.com/KrLrtv/Nexus-AI/v2.0.6-alpha/install.sh && \
+https://raw.githubusercontent.com/KrLrtv/Nexus-AI/v2.0.7-alpha/install.sh && \
 bash "$HOME/nexus-install.sh"
 ```
 
