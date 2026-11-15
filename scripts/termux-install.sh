@@ -4,7 +4,7 @@
 # For a FULL install, pass a trusted release ZIP URL (or local ZIP) containing source.
 set -Eeuo pipefail
 
-VERSION='0.1.5-alpha'
+VERSION='0.1.6-alpha'
 MODEL='sherpa-onnx-small-zipformer-ru-2024-09-18'
 MODEL_URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/${MODEL}.tar.bz2"
 TPIO_REPO='https://github.com/7wp81x/Termux-PlatformIO.git'
