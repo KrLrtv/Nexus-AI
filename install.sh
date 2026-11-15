@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# NEXUS AI v0.1.0-alpha bootstrap for F-Droid Termux.
+# NEXUS AI v0.1.1-alpha bootstrap for F-Droid Termux.
 # Usage: bash install.sh (or download this script from the pinned GitHub release tag).
 set -Eeuo pipefail
 REPO='KrLrtv/Nexus-AI'
-TAG='v0.1.0-alpha'
+TAG='v0.1.1-alpha'
 BASE="https://raw.githubusercontent.com/${REPO}/${TAG}"
-ARCHIVE="https://github.com/${REPO}/archive/refs/tags/${TAG}.zip"
+ARCHIVE="https://codeload.github.com/${REPO}/zip/refs/tags/${TAG}"
 
 if [[ "${PREFIX:-}" != '/data/data/com.termux/files/usr' ]]; then
   echo 'Запусти установку в Termux (не внутри Ubuntu PRoot).' >&2

@@ -1,6 +1,6 @@
 # NEXUS AI · M5StickC Plus2
 
-**Кандидат первого экспериментального релиза — v0.1.0-alpha (тег ещё не опубликован).** Голосовой помощник с M5StickC Plus2, локальным Android-мостом на Termux и облачным NEXUS Brain.
+**Текущий экспериментальный релиз — v0.1.1-alpha.** Голосовой помощник с M5StickC Plus2, локальным Android-мостом на Termux и облачным NEXUS Brain.
 
 > ⚠️ Alpha: это снимок текущих исходников, а не гарантия полной совместимости с любым устройством. Перед прошивкой проверь Wi-Fi, токен устройства и параметры `platformio.ini`.
 
@@ -22,7 +22,7 @@
 ```bash
 pkg update -y && pkg install -y curl && \
 curl -fL --retry 3 -o "$HOME/nexus-install.sh" \
-https://raw.githubusercontent.com/KrLrtv/Nexus-AI/v0.1.0-alpha/install.sh && \
+https://raw.githubusercontent.com/KrLrtv/Nexus-AI/v0.1.1-alpha/install.sh && \
 bash "$HOME/nexus-install.sh"
 ```
 
@@ -43,7 +43,7 @@ tpio run -e m5stickc_plus2
 
 Если сборка не проходит, не выполняй `tpio flash`: он может записать старый бинарник.
 
-> Команда установки выше станет рабочей только после публикации и проверки тега `v0.1.0-alpha`. До этого исходники нужно проверять локально.
+> Alpha-сборка: установка ещё требует проверки на реальном телефоне. Если возникнет ошибка, проверь `tail -n 80 ~/nexus-fdroid-install.log` и не отправляй личные ключи.
 
 ## Структура
 
