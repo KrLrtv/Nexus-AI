@@ -24,6 +24,7 @@ ROOT = Path.home() / 'nexus-ai'
 sys.path.insert(0, str(ROOT))
 import nexusctl as engine
 import nexus_device as m5
+import nexus_update as releases
 
 CFG = Path.home() / '.config' / 'nexus'
 LOG = Path.home() / 'nexus-ai.log'
@@ -165,6 +166,7 @@ class ControlCenter:
                 ('M5StickC Plus2 · Wi-Fi и прошивка','m5'),
                 ('Настройки AI и голоса','settings'),
                 ('Обновить NEXUS из GitHub','update'),
+                ('Откатить обновление NEXUS','rollback'),
                 ('Журнал событий','logs'),
                 ('Диагностика','diagnostics'),
             ]
@@ -251,6 +253,7 @@ class ControlCenter:
                 ('Прошивка','есть · '+datetime.fromtimestamp(firmware.stat().st_mtime).strftime('%d.%m %H:%M') if firmware.is_file() else 'не найдена'),
                 ('Версия NEXUS',(CFG/'installed_version').read_text(encoding='utf-8').strip() if (CFG/'installed_version').is_file() else 'неизвестна'),
                 ('Wi-Fi M5',m5._value('NEXUS_WIFI_SSID') or 'не настроен'),
+                ('Откат', releases.backup_version(releases.backup_candidates()[0]) if releases.backup_candidates() else 'копия не создана'),
             ]
             for key,val in info:
                 print('  '+c(key+': ',MUTED)+crop(val,max(14,w-width(key)-6)))
@@ -282,6 +285,12 @@ class ControlCenter:
         if action=='m5-build': self.popup(m5.build);return
         if action=='m5-flash': self.popup(m5.flash);return
         if action=='m5-build-flash': self.popup(m5.build_flash);return
+        if action=='rollback':
+            def run_rollback():
+                code = subprocess.run([sys.executable,str(ROOT/'nexus_update.py'),'--rollback'],check=False).returncode
+                if code: raise RuntimeError('Откат отменён или не выполнен. Проверь вывод выше')
+                print('Предыдущая версия восстановлена. Перезапусти меню nexus.')
+            self.popup(run_rollback);return
         if action=='update':
             def run_update():
                 code = subprocess.run([sys.executable,str(ROOT/'nexus_update.py')],check=False).returncode
