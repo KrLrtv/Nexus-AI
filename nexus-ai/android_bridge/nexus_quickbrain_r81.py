@@ -69,7 +69,7 @@ def ask_fast(query: str, history: list) -> str:
     if model.startswith(('gemini-3.1-flash-lite','gemini-3.5-flash-lite')):
         config['thinkingConfig'] = {'thinkingLevel':'minimal'}
     payload = {
-        'systemInstruction': {'parts':[{'text': SYSTEM + _learning20_store.context_for(query) +
+        'systemInstruction': {'parts':[{'text': SYSTEM + _learning20_store.safe_context_for(query) +
             ' Отвечай на вопрос кратко, на русском, 1–3 предложения. '
             'Не вызывай инструменты, не выполняй действий, не выдумывай актуальные факты.'}]},
         'contents':contents,
