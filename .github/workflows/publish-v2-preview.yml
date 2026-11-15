@@ -33,7 +33,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          TAG='v2.0.0-alpha'
+          TAG='v2.0.1-alpha'
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Preview already exists; immutable historical tag preserved."
             exit 0
