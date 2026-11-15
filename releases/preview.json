@@ -1,6 +1,6 @@
 {
   "repository": "KrLrtv/Nexus-AI",
   "channel": "preview",
-  "tag": "v2.0.5-alpha",
-  "description": "NEXUS 2.0.5 Auto Learn & Answer: tested bounded skills activate automatically and answer the original request; SMS confirmation retained"
+  "tag": "v2.0.6-alpha",
+  "description": "NEXUS 2.0.6 Native Learning: ordinary requests can acquire tested bounded skills automatically and continue the original task; existing safety boundaries retained"
 }
