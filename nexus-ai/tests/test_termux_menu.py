@@ -26,6 +26,7 @@ def module(name, file):
 m5 = module("nexus_device_tests", "nexus_device.py")
 up = module("nexus_update_tests", "nexus_update.py")
 learning = module("learning20", "android_bridge/learning20.py")
+academy = module("skill_academy", "android_bridge/skill_academy.py")
 
 
 def release_zip(path: Path, malicious: str | None = None) -> None:
@@ -212,6 +213,7 @@ class TuiErrorTest(unittest.TestCase):
             "nexus_update": up,
             "nexus_autostart": module("nexus_autostart_tui_tests", "nexus_autostart.py"),
             "learning20": learning,
+            "skill_academy": academy,
         }):
             return module("nexus_tui_tests", "nexus_tui.py")
 
@@ -249,6 +251,7 @@ class MenuOnlyWorkflowTest(unittest.TestCase):
             "nexusctl": fake_engine, "nexus_device": m5, "nexus_update": up,
             "nexus_autostart": startup,
             "learning20": learning,
+            "skill_academy": academy,
         }):
             tui = module("nexus_tui_menu_only_tests", "nexus_tui.py")
         return tui.ControlCenter(), tui
@@ -293,10 +296,32 @@ class MenuOnlyWorkflowTest(unittest.TestCase):
         screen,tui=self._ui()
         screen.page="learn"
         actions={key for _,key in screen.entries()}
-        self.assertTrue({"learn-fact","learn-preference","learn-list","learn-search",
+        self.assertTrue({"learn-fact","learn-preference","learn-list","skills",
                          "learn-correct","learn-rate","learn-toggle",
                          "learn-manage"}.issubset(actions))
         self.assertLessEqual(len(screen.entries()),9)
+
+    def test_skill_academy_menu_is_reachable_from_self_learning(self):
+        screen,tui=self._ui()
+        screen.page="learn"
+        self.assertIn("skills",{a for _,a in screen.entries()})
+        screen.handle("skills")
+        self.assertEqual(screen.page,"skills")
+        actions={a for _,a in screen.entries()}
+        self.assertTrue({"skills-status","skills-prepare","skills-list",
+                         "skills-pending","skills-learn","skills-clear"}.issubset(actions))
+        self.assertLessEqual(len(screen.entries()),9)
+
+    def test_skill_setup_declined_without_package_install(self):
+        screen,tui=self._ui()
+        academy_fake=types.SimpleNamespace(status=lambda:{"contacts_cli":False,"sms_cli":False},
+                                           prepare_sms=lambda install: (_ for _ in ()).throw(
+                                               AssertionError("Setup cannot run without approval")))
+        with patch.object(tui,"academy",academy_fake),\
+             patch("builtins.input",return_value="нет"),\
+             patch("sys.stdout",io.StringIO()):
+            screen.handle("skills-prepare")
+        self.assertTrue(screen.flash_error)
 
     def test_add_preference_from_menu_without_shell_command(self):
         screen,tui=self._ui()
