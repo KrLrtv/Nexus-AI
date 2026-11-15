@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT))
 import nexusctl as engine
 import nexus_device as m5
 import nexus_update as releases
+import nexus_autostart as shell_startup
 
 CFG = Path.home() / '.config' / 'nexus'
 LOG = Path.home() / 'nexus-ai.log'
@@ -142,7 +143,8 @@ class Tee(io.TextIOBase):
 class ControlCenter:
     def __init__(self):
         self.page = 'home'
-        self.selected = {'home':0,'settings':0,'m5':0}
+        self.selected = {'home':0,'settings':0,'m5':0,'versions':0}
+        self.relaunch = False
         self.flash = ''
         self.flash_error = False
         self.cache_until = 0.0
@@ -166,8 +168,8 @@ class ControlCenter:
                 ('Перезапустить NEXUS','restart'),
                 ('M5StickC Plus2 · Wi-Fi и прошивка','m5'),
                 ('Настройки AI и голоса','settings'),
-                ('Обновить NEXUS из GitHub','update'),
-                ('Откатить обновление NEXUS','rollback'),
+                ('Обновить NEXUS','update'),
+                ('Версии · NEXUS 2.0 · откат','versions'),
                 ('Журнал событий','logs'),
                 ('Диагностика','diagnostics'),
             ]
@@ -178,6 +180,18 @@ class ControlCenter:
                 ('Собрать прошивку (без записи)','m5-build'),
                 ('Прошить собранную версию','m5-flash'),
                 ('Собрать и прошить M5','m5-build-flash'),
+            ]
+        if self.page == 'versions':
+            try: autostart = shell_startup.enabled()
+            except (RuntimeError,OSError): autostart = False
+            return [
+                ('Проверить доступные версии','versions-check'),
+                ('Установить NEXUS 2.0 · эксперимент','versions-preview'),
+                ('Перейти на обычную версию 1.x','versions-stable'),
+                ('Откатить последнее обновление','rollback'),
+                ('Показать резервную копию','versions-backups'),
+                ('Удалить резервную копию','versions-clear'),
+                ('Автозапуск меню · '+('ВКЛ' if autostart else 'ВЫКЛ'),'versions-autostart'),
             ]
         if self.page == 'settings':
             voice = read_mode('voice_clarity_mode','clear', {'clear','original'})
@@ -210,8 +224,8 @@ class ControlCenter:
         except Exception: model = 'не определена'
         self.line('Модель: '+model,w)
         print()
-        if self.page in ('home','settings','m5'):
-            print(c({'home':'  ГЛАВНАЯ','settings':'  НАСТРОЙКИ','m5':'  M5STICKC PLUS2'}[self.page],ACCENT,True))
+        if self.page in ('home','settings','m5','versions'):
+            print(c({'home':'  ГЛАВНАЯ','settings':'  НАСТРОЙКИ','m5':'  M5STICKC PLUS2','versions':'  ВЕРСИИ И ОБНОВЛЕНИЯ'}[self.page],ACCENT,True))
             print()
             for i,(label,action) in enumerate(self.entries()):
                 focus = i == self.selected[self.page]
@@ -285,26 +299,70 @@ class ControlCenter:
             self.flash=sanitise('Ошибка: '+type(exc).__name__+': '+str(exc)[:140])
         self.cache_until=0
 
+    def updater_action(self, flags, restart=False, confirmation=None):
+        """Run updater from the menu, without making the owner type shell commands."""
+        completed=False
+        def run():
+            nonlocal completed
+            if confirmation:
+                label, answer=confirmation
+                if input(label).strip()!=answer:
+                    print('Установка экспериментальной версии отменена.')
+                    return False
+            code=subprocess.run(
+                [sys.executable,str(ROOT/'nexus_update.py'),*flags],check=False).returncode
+            if code:
+                print('Действие не завершено. Проверь подробный вывод выше.')
+                return False
+            completed=True
+            print('Операция завершена успешно.')
+            return True
+        self.popup(run)
+        if completed and restart:
+            self.relaunch=True
+            self.run=False
+
     def handle(self, action):
         if action=='settings': self.page='settings';self.flash='';return
+        if action=='versions': self.page='versions';self.flash='';return
         if action=='m5': self.page='m5';self.flash='';return
         if action=='m5-status': self.popup(m5.status);return
         if action=='m5-wifi': self.popup(m5.wifi,sensitive=True);return
         if action=='m5-build': self.popup(m5.build);return
         if action=='m5-flash': self.popup(m5.flash);return
         if action=='m5-build-flash': self.popup(m5.build_flash);return
-        if action=='rollback':
-            def run_rollback():
-                code = subprocess.run([sys.executable,str(ROOT/'nexus_update.py'),'--rollback'],check=False).returncode
-                if code: raise RuntimeError('Откат отменён или не выполнен. Проверь вывод выше')
-                print('Предыдущая версия восстановлена. Перезапусти меню nexus.')
-            self.popup(run_rollback);return
         if action=='update':
-            def run_update():
-                code = subprocess.run([sys.executable,str(ROOT/'nexus_update.py')],check=False).returncode
-                if code: raise RuntimeError('Обновление не удалось. Проверь вывод выше')
-                print('Готово. Для нового интерфейса перезапусти меню nexus.')
-            self.popup(run_update);return
+            self.updater_action([], restart=True);return
+        if action=='rollback':
+            self.updater_action(['--rollback'], restart=True);return
+        if action=='versions-preview':
+            self.updater_action(['--preview'], restart=True,
+                confirmation=('NEXUS 2.0 экспериментальный. Для установки введи 2.0: ','2.0'));return
+        if action=='versions-stable':
+            confirm = (('Вернуться с 2.0 на обычную версию? Введи 1.x: ','1.x')
+                       if releases.installed_version().startswith('v2.') else None)
+            self.updater_action(['--stable'], restart=True, confirmation=confirm);return
+        if action=='versions-backups':
+            self.updater_action(['--backups']);return
+        if action=='versions-clear':
+            self.updater_action(['--clear-backups']);return
+        if action=='versions-check':
+            def check_versions():
+                for title,flag in (('Обычная версия 1.x','--stable'),
+                                   ('Экспериментальная 2.x','--preview')):
+                    print(title + ':')
+                    proc=subprocess.run([sys.executable,str(ROOT/'nexus_update.py'),
+                                         '--check', flag],check=False)
+                    if proc.returncode:
+                        print('Не удалось проверить этот канал (сеть или GitHub).')
+                print('Текущая версия:', releases.installed_version())
+            self.popup(check_versions);return
+        if action=='versions-autostart':
+            def toggle_autostart():
+                now = shell_startup.set_enabled(not shell_startup.enabled())
+                print('Автозапуск меню при открытии Termux:', 'ВКЛЮЧЕН' if now else 'ВЫКЛЮЧЕН')
+                print('Изменение начнёт действовать в новой сессии Termux.')
+            self.popup(toggle_autostart);return
         if action=='logs': self.page='logs';self.flash='';return
         if action=='diagnostics': self.page='diagnostics';self.flash='';return
         if action=='toggle':
@@ -346,7 +404,7 @@ class ControlCenter:
                     if self.page=='home': return
                     self.page='home'; self.flash='';continue
                 if key=='r': self.cache_until=0;continue
-                if self.page not in ('home','settings','m5'): continue
+                if self.page not in ('home','settings','m5','versions'): continue
                 entries=self.entries()
                 selection=self.selected[self.page]
                 if key in ('down','j'):
@@ -365,7 +423,10 @@ class ControlCenter:
 
 
 def main():
-    ControlCenter().loop()
+    ui = ControlCenter()
+    ui.loop()
+    if ui.relaunch:
+        os.execv(sys.executable, [sys.executable, str(ROOT/'nexus_tui.py')])
 
 if __name__ == '__main__':
     main()
