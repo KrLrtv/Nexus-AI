@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# NEXUS AI v0.1.2-alpha bootstrap for F-Droid Termux.
+# NEXUS AI v0.1.3-alpha bootstrap for F-Droid Termux.
 # Usage: bash install.sh (or download this script from the pinned GitHub release tag).
 set -Eeuo pipefail
 REPO='KrLrtv/Nexus-AI'
-TAG='v0.1.2-alpha'
+TAG='v0.1.3-alpha'
 BASE="https://raw.githubusercontent.com/${REPO}/${TAG}"
 ARCHIVE="https://codeload.github.com/${REPO}/zip/refs/tags/${TAG}"
 
@@ -17,4 +17,9 @@ TMP="$(mktemp "${TMPDIR:-$PREFIX/tmp}/nexus-bootstrap-XXXXXX.sh")"
 trap 'rm -f "$TMP"' EXIT
 curl -fL --retry 3 --connect-timeout 15 -o "$TMP" "$BASE/scripts/termux-install.sh"
 # Uses the source snapshot of the same immutable release tag as this bootstrap.
-bash "$TMP" install "$ARCHIVE"
+if [[ -f "$HOME/nexus-ai/nexusctl.py" && -f "$HOME/nexus-firmware/firmware/platformio.ini" ]]; then
+  echo '[NEXUS] Обнаружена незавершённая или прежняя установка; сохраняю локальные настройки.'
+  bash "$TMP" finish "$ARCHIVE"
+else
+  bash "$TMP" install "$ARCHIVE"
+fi
