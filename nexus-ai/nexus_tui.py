@@ -28,6 +28,7 @@ import nexus_update as releases
 import nexus_autostart as shell_startup
 sys.path.insert(0, str(ROOT / 'android_bridge'))
 from learning20 import STORE as learning_store, previous_exchange as learning_previous_exchange
+import skill_academy as academy
 
 CFG = Path.home() / '.config' / 'nexus'
 LOG = Path.home() / 'nexus-ai.log'
@@ -145,7 +146,7 @@ class Tee(io.TextIOBase):
 class ControlCenter:
     def __init__(self):
         self.page = 'home'
-        self.selected = {'home':0,'settings':0,'m5':0,'learn':0,'versions':0,'learn-manage':0}
+        self.selected = {'home':0,'settings':0,'m5':0,'learn':0,'versions':0,'learn-manage':0,'skills':0}
         self.relaunch = False
         self.learning_filter = ''
         self.flash = ''
@@ -203,12 +204,21 @@ class ControlCenter:
                 ('Состояние обучения','learn-stats'),
                 ('Запомнить факт','learn-fact'),
                 ('Запомнить предпочтение','learn-preference'),
-                ('Воспоминания · список','learn-list'),
-                ('Найти в памяти','learn-search'),
+                ('Воспоминания · список/поиск','learn-list'),
                 ('Исправить последний ответ','learn-correct'),
                 ('Оценить последний ответ','learn-rate'),
                 ('Gemini: передавать память · '+('ДА' if shared else 'НЕТ'),'learn-toggle'),
+                ('Новые навыки · команда «научись»','skills'),
                 ('Удаление и очистка памяти','learn-manage'),
+            ]
+        if self.page == 'skills':
+            return [
+                ('Состояние новых навыков','skills-status'),
+                ('Подготовить SMS и контакты','skills-prepare'),
+                ('Освоенные навыки','skills-list'),
+                ('Последняя невыполненная задача','skills-pending'),
+                ('Попробовать научиться сейчас','skills-learn'),
+                ('Очистить незавершённые задачи','skills-clear'),
             ]
         if self.page == 'learn-manage':
             return [
@@ -246,8 +256,8 @@ class ControlCenter:
         except Exception: model = 'не определена'
         self.line('Модель: '+model,w)
         print()
-        if self.page in ('home','settings','m5','learn','versions','learn-manage'):
-            print(c({'home':'  ГЛАВНАЯ','settings':'  НАСТРОЙКИ','m5':'  M5STICKC PLUS2','learn':'  ОБУЧЕНИЕ 2.0','versions':'  ВЕРСИИ И ОБНОВЛЕНИЯ','learn-manage':'  ПАМЯТЬ · УДАЛЕНИЕ'}[self.page],ACCENT,True))
+        if self.page in ('home','settings','m5','learn','versions','learn-manage','skills'):
+            print(c({'home':'  ГЛАВНАЯ','settings':'  НАСТРОЙКИ','m5':'  M5STICKC PLUS2','learn':'  ОБУЧЕНИЕ 2.0','versions':'  ВЕРСИИ И ОБНОВЛЕНИЯ','learn-manage':'  ПАМЯТЬ · УДАЛЕНИЕ','skills':'  НОВЫЕ НАВЫКИ'}[self.page],ACCENT,True))
             print()
             for i,(label,action) in enumerate(self.entries()):
                 focus = i == self.selected[self.page]
@@ -360,6 +370,50 @@ class ControlCenter:
         if action=='settings': self.page='settings';self.flash='';return
         if action=='versions': self.page='versions';self.flash='';return
         if action=='learn': self.page='learn';self.flash='';return
+        if action=='skills': self.page='skills';self.flash='';return
+        if action=='skills-status':
+            def skills_status():
+                state=academy.status()
+                print('Контакты Termux:API:', 'доступны' if state['contacts_cli'] else 'не установлен модуль')
+                print('SMS Termux:API:', 'доступен' if state['sms_cli'] else 'не установлен модуль')
+                print('Навык SMS:', 'настроен' if state['configured'] else 'не настроен')
+                print('Сообщения без явного подтверждения не отправляются.')
+            self.popup(skills_status);return
+        if action=='skills-list':
+            def skills_list():
+                entries=academy.skills()
+                if not entries: print('Освоенных навыков пока нет.')
+                for item in entries:
+                    print(item['kind']+': '+item['status'])
+            self.popup(skills_list);return
+        if action=='skills-pending':
+            def skills_pending():
+                goal=academy.pending_goal()
+                print('Последняя задача:', goal['intent'] if goal else 'не найдена')
+            self.popup(skills_pending);return
+        if action=='skills-learn':
+            self.popup(lambda:print(academy.handle('научись')));return
+        if action=='skills-prepare':
+            def skills_prepare():
+                need = not (academy.status()['contacts_cli'] and academy.status()['sms_cli'])
+                install = False
+                if need:
+                    install = input('Установить официальный пакет termux-api через pkg? Напиши ДА: ').strip()=='ДА'
+                    if not install:
+                        print('Установка отменена.')
+                        return False
+                print(academy.prepare_sms(install=install))
+                return True
+            self.popup(skills_prepare);return
+        if action=='skills-clear':
+            def skills_clear():
+                if input('Удалить незавершённые задачи обучения? Напиши УДАЛИТЬ: ').strip()!='УДАЛИТЬ':
+                    print('Очистка отменена.')
+                    return False
+                academy.clear_pending()
+                print('Незавершённые задачи очищены. Готовые навыки сохранены.')
+                return True
+            self.popup(skills_clear);return
         if action=='learn-stats':
             def learn_stats():
                 data=learning_store.stats()
