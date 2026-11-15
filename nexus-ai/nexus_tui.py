@@ -29,6 +29,7 @@ import nexus_autostart as shell_startup
 sys.path.insert(0, str(ROOT / 'android_bridge'))
 from learning20 import STORE as learning_store, previous_exchange as learning_previous_exchange
 import skill_academy as academy
+import skill_forge as forge
 
 CFG = Path.home() / '.config' / 'nexus'
 LOG = Path.home() / 'nexus-ai.log'
@@ -146,7 +147,7 @@ class Tee(io.TextIOBase):
 class ControlCenter:
     def __init__(self):
         self.page = 'home'
-        self.selected = {'home':0,'settings':0,'m5':0,'learn':0,'versions':0,'learn-manage':0,'skills':0}
+        self.selected = {'home':0,'settings':0,'m5':0,'learn':0,'versions':0,'learn-manage':0,'skills':0,'forge':0}
         self.relaunch = False
         self.learning_filter = ''
         self.flash = ''
@@ -219,6 +220,16 @@ class ControlCenter:
                 ('Последняя невыполненная задача','skills-pending'),
                 ('Попробовать научиться сейчас','skills-learn'),
                 ('Очистить незавершённые задачи','skills-clear'),
+                ('Лаборатория новых модулей','forge'),
+            ]
+        if self.page == 'forge':
+            return [
+                ('Создать новый модуль с Gemini','forge-create'),
+                ('Все черновики навыков','forge-list'),
+                ('Посмотреть код и тесты','forge-view'),
+                ('Повторить проверки','forge-test'),
+                ('Одобрить проверенный модуль','forge-approve'),
+                ('Отклонить / отключить модуль','forge-reject'),
             ]
         if self.page == 'learn-manage':
             return [
@@ -256,8 +267,8 @@ class ControlCenter:
         except Exception: model = 'не определена'
         self.line('Модель: '+model,w)
         print()
-        if self.page in ('home','settings','m5','learn','versions','learn-manage','skills'):
-            print(c({'home':'  ГЛАВНАЯ','settings':'  НАСТРОЙКИ','m5':'  M5STICKC PLUS2','learn':'  ОБУЧЕНИЕ 2.0','versions':'  ВЕРСИИ И ОБНОВЛЕНИЯ','learn-manage':'  ПАМЯТЬ · УДАЛЕНИЕ','skills':'  НОВЫЕ НАВЫКИ'}[self.page],ACCENT,True))
+        if self.page in ('home','settings','m5','learn','versions','learn-manage','skills','forge'):
+            print(c({'home':'  ГЛАВНАЯ','settings':'  НАСТРОЙКИ','m5':'  M5STICKC PLUS2','learn':'  ОБУЧЕНИЕ 2.0','versions':'  ВЕРСИИ И ОБНОВЛЕНИЯ','learn-manage':'  ПАМЯТЬ · УДАЛЕНИЕ','skills':'  НОВЫЕ НАВЫКИ','forge':'  ЛАБОРАТОРИЯ МОДУЛЕЙ'}[self.page],ACCENT,True))
             print()
             for i,(label,action) in enumerate(self.entries()):
                 focus = i == self.selected[self.page]
@@ -371,6 +382,84 @@ class ControlCenter:
         if action=='versions': self.page='versions';self.flash='';return
         if action=='learn': self.page='learn';self.flash='';return
         if action=='skills': self.page='skills';self.flash='';return
+        if action=='forge': self.page='forge';self.flash='';return
+        if action=='forge-create':
+            def create_module():
+                request=input('Какой новый навык спроектировать: ').strip()
+                if not request:
+                    print('Задача не введена. Отменено.')
+                    return False
+                draft=forge.propose(request)
+                print('Черновик #'+str(draft['id'])+' · '+draft['name'])
+                print(draft['summary'])
+                print('Статус:',draft['state'])
+                print('Тесты:',draft['report']['checks'])
+                if draft['state']=='tested':
+                    print('Код не исполнялся. Включить можно отдельным пунктом меню.')
+                else:
+                    print('Требуется ревью исходников; автоматическое включение запрещено.')
+                return True
+            self.popup(create_module);return
+        if action=='forge-list':
+            def drafts():
+                items=forge.list_drafts(15)
+                if not items:print('Черновиков пока нет.')
+                for item in items:
+                    print('#'+str(item['id'])+' · '+item['name']+
+                          ' · '+item['kind']+' · '+item['state'])
+                    print('  '+sanitise(item['intent'])[:130])
+            self.popup(drafts);return
+        if action in ('forge-view','forge-test','forge-approve','forge-reject'):
+            def select_draft():
+                items=forge.list_drafts(1)
+                default=str(items[0]['id']) if items else ''
+                raw=input('ID модуля (Enter = последний #'+(default or '?')+'): ').strip() or default
+                if not raw.isdecimal():
+                    print('Нужен числовой ID.')
+                    return False
+                identifier=int(raw)
+                draft=forge._get(identifier)
+                if not draft:
+                    print('Модуль не найден.')
+                    return False
+                if action=='forge-view':
+                    print('#'+str(identifier),draft['name'],'·',draft['state'])
+                    print('Задача:',sanitise(draft['intent'])[:300])
+                    print('Описание:',draft['summary'])
+                    print('Проверки:',draft['report']['checks'])
+                    print('Ошибки:',draft['report']['errors'])
+                    if draft['payload'].get('source'):
+                        print('ИСХОДНЫЙ КОД (только просмотр, не запущен):')
+                        print(sanitise(draft['payload']['source'])[:3400])
+                    elif draft['payload'].get('steps'):
+                        print('Сценарий (только чтение):')
+                        print(draft['payload']['steps'])
+                    return True
+                if action=='forge-test':
+                    checked=forge.retest(identifier)
+                    print('Статус:',checked['state'])
+                    print('Тесты:',checked['report']['checks'])
+                    print('Причины:',checked['report']['errors'])
+                    return checked['state'] in ('tested','active')
+                if action=='forge-approve':
+                    if draft['state'] not in ('tested','active'):
+                        print('Модуль не прошёл безопасные проверки. Включение запрещено.')
+                        return False
+                    if input('Включить #'+str(identifier)+'? Введи ОДОБРЯЮ '+str(identifier)+': ').strip() != 'ОДОБРЯЮ '+str(identifier):
+                        print('Включение отменено.')
+                        return False
+                    approved=forge.approve(identifier)
+                    print('Навык активирован. Применение — по исходному голосовому запросу.')
+                    return approved['state']=='active'
+                if input('Отклонить/отключить #'+str(identifier)+'? Введи ОТКЛОНИТЬ: ').strip()!='ОТКЛОНИТЬ':
+                    print('Отклонение отменено.')
+                    return False
+                if forge.reject(identifier):
+                    print('Черновик отклонён. Навык отключён.')
+                    return True
+                print('Не удалось отклонить модуль.')
+                return False
+            self.popup(select_draft);return
         if action=='skills-status':
             def skills_status():
                 state=academy.status()
@@ -584,14 +673,15 @@ class ControlCenter:
                 if key=='q': return
                 if key in ('0','back','h'):
                     if self.page=='home': return
-                    self.page='learn' if self.page in ('learning-list','learn-manage','skills') else 'home'
+                    self.page=('skills' if self.page=='forge' else
+                               'learn' if self.page in ('learning-list','learn-manage','skills') else 'home')
                     self.flash='';continue
                 if self.page=='learning-list' and key=='f':
                     try: self.learning_filter=input('Поиск в памяти (Enter = всё): ').strip()[:150]
                     except (EOFError,KeyboardInterrupt): self.flash='Поиск отменён'
                     continue
                 if key=='r': self.cache_until=0;continue
-                if self.page not in ('home','settings','m5','learn','versions','learn-manage','skills'): continue
+                if self.page not in ('home','settings','m5','learn','versions','learn-manage','skills','forge'): continue
                 entries=self.entries()
                 selection=self.selected[self.page]
                 if key in ('down','j'):
