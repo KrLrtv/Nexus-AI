@@ -1,6 +1,6 @@
 {
   "repository": "KrLrtv/Nexus-AI",
   "channel": "preview",
-  "tag": "v2.0.0-alpha",
-  "description": "NEXUS 2.0 local self-learning preview; opt-in only"
+  "tag": "v2.0.1-alpha",
+  "description": "NEXUS 2.0 self-learning with fully menu-controlled updates; opt-in only"
 }
