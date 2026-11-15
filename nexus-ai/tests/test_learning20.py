@@ -65,6 +65,10 @@ class LearningStoreTests(unittest.TestCase):
         self.assertNotIn("пароль", system)
         self.assertEqual(self.db.list_facts()[0]["used"], 1)
 
+    def test_corrupt_memory_store_does_not_break_cloud_answer(self):
+        with patch.object(self.db, "context_for", side_effect=OSError("bad database")):
+            self.assertEqual(self.db.safe_context_for("запрос"), "")
+
     def test_correction_exact_match_only_and_feedback(self):
         self.db.feedback("Что такое энкодер?", "Это неправильно", -1,
                          "Энкодер преобразует движение в электрический сигнал.")
