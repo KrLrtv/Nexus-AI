@@ -1,15 +1,16 @@
-# NEXUS: local data, credentials and build outputs
-**/.pio/
+# NEXUS AI — do not publish personal keys, tokens, or build artifacts.
 **/.git/
+**/.pio/
 **/__pycache__/
 **/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
 **/.venv/
 **/venv/
 **/node_modules/
-**/.cache/
 **/.nexus-backups/
 **/backups/
-**/models/
+**/logs/
 **/*.log
 **/*.sqlite
 **/*.sqlite3
@@ -19,21 +20,22 @@
 **/*.uf2
 **/*.hex
 **/*.map
-**/*.onnx
 **/*.pem
 **/*.p12
 **/*.pfx
 **/*.key
 **/.env
 **/.env.*
-**/secrets.env
+**/*secrets.env
 **/device.env
 **/gemini.env
 **/credentials.json
 **/token.json
 **/NexusLocalSecrets.h
 **/local_secrets.h
-**/device_secrets.h
-**/local_config.h
 **/.DS_Store
 **/config_local.h
+
+**/.tpio/
+**/config_generated.h
+**/generated_secrets.h

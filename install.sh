@@ -1,35 +1,20 @@
 #!/usr/bin/env bash
-# NEXUS AI bootstrap. Do not claim installation if source is incomplete.
+# NEXUS AI v0.1.0-alpha bootstrap for F-Droid Termux.
+# Usage: bash install.sh (or download this script from the pinned GitHub release tag).
 set -Eeuo pipefail
-REPO="KrLrtv/Nexus-AI"
-REF="${NEXUS_REF:-main}"
-BASE="https://raw.githubusercontent.com/${REPO}/${REF}"
-if [[ "${PREFIX:-}" != "/data/data/com.termux/files/usr" ]]; then
-  echo "[NEXUS] Run in Termux, not in Ubuntu/proot." >&2
+REPO='KrLrtv/Nexus-AI'
+TAG='v0.1.0-alpha'
+BASE="https://raw.githubusercontent.com/${REPO}/${TAG}"
+ARCHIVE="https://github.com/${REPO}/archive/refs/tags/${TAG}.zip"
+
+if [[ "${PREFIX:-}" != '/data/data/com.termux/files/usr' ]]; then
+  echo 'Запусти установку в Termux (не внутри Ubuntu PRoot).' >&2
   exit 1
 fi
-if ! command -v curl >/dev/null 2>&1; then
-  echo "[NEXUS] Please run: pkg install -y curl" >&2
-  exit 1
-fi
-echo "[NEXUS] Checking release completeness..."
-required=(
-  "nexus-ai/nexusctl.py"
-  "nexus-ai/android_bridge/app.py"
-  "nexus-ai/android_bridge/planner.py"
-  "nexus-ai/android_bridge/supervisor.py"
-  "nexus-firmware/firmware/platformio.ini"
-  "nexus-firmware/firmware/src/main.cpp"
-)
-for path in "${required[@]}"; do
-  if ! curl --fail --silent --show-error --location --output /dev/null "${BASE}/${path}"; then
-    echo "[NEXUS] Source missing: ${path}" >&2
-    echo "[NEXUS] Release is not published yet; no changes were made." >&2
-    exit 2
-  fi
-done
-echo "[NEXUS] Sources detected. Checking installer..."
-tmp="$(mktemp "${TMPDIR:-${PREFIX}/tmp}/nexus-install-XXXXXX.sh")"
-trap 'rm -f "$tmp"' EXIT
-curl --fail --show-error --location --retry 3 --output "$tmp" "${BASE}/scripts/termux-install.sh"
-bash "$tmp" install "https://github.com/${REPO}/archive/refs/heads/${REF}.zip"
+command -v curl >/dev/null 2>&1 || { echo 'Сначала: pkg install curl' >&2; exit 1; }
+command -v bash >/dev/null 2>&1 || exit 1
+TMP="$(mktemp "${TMPDIR:-$PREFIX/tmp}/nexus-bootstrap-XXXXXX.sh")"
+trap 'rm -f "$TMP"' EXIT
+curl -fL --retry 3 --connect-timeout 15 -o "$TMP" "$BASE/scripts/termux-install.sh"
+# Uses the source snapshot of the same immutable release tag as this bootstrap.
+bash "$TMP" install "$ARCHIVE"
