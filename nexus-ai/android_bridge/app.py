@@ -18,6 +18,7 @@ from skill_academy import handle as _skill_academy_handle, note_refusal as _skil
 from core10 import permission,set_permission,goals,graph_search,logs,get_events,ack_events,enqueue,log
 from gestures import train, configure, match, SAFE_GESTURE_ACTIONS
 import nexus_runtime_settings as nexus_settings  # NEXUS_R8_SETTINGS
+import source_learning as _source_learning
 from session import VoiceSession
 VOICE_SESSION=VoiceSession()
 
@@ -49,7 +50,15 @@ def ascii_display(value):
 
 def publish(reply,status,event):
     with mutex:
+        state.pop('sources', None)
+        state.pop('search_suggestions', None)
         state.update(reply=reply[:1500],display=ascii_display(reply),state=status,last_event=event,seq=state['seq']+1)
+
+def publish_source_result(outcome, event):
+    publish(outcome['reply'], 'ANSWER via NEXUS Sources', event)
+    with mutex:
+        state['sources'] = outcome.get('sources', [])
+        state['search_suggestions'] = outcome.get('search_suggestions', '')
 
 def authorized():
     import hmac
@@ -60,6 +69,7 @@ HTML='''<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewpor
 <h2>◉ NEXUS AI</h2><p id="state">Connecting...</p><p id="reply"></p>
 <form onsubmit="ask(event)"><input id="prompt" placeholder="Спроси NEXUS..."><button>Отправить</button></form>
 <div id="approval"></div>
+<iframe id="searchSuggestions" title="Google Search suggestions" sandbox="allow-popups allow-popups-to-escape-sandbox" style="width:100%;border:0" hidden></iframe>
 <h3>Локальная память и планировщик</h3>
 <button onclick="showLocal('memory')">Воспоминания</button>
 <button onclick="showLocal('reminders')">Назначенные напоминания</button>
@@ -97,6 +107,7 @@ async function approve(id,yes){let r=await fetch('/approve',{method:'POST',heade
 async function armGesture(){let label=document.getElementById('gesture').value;let r=await fetch('/gesture/train/arm',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label})});document.getElementById('gestureStatus').textContent=(await r.json()).message;}
 async function setGesture(){let label=document.getElementById('gesture').value,action=document.getElementById('gestureAction').value;let r=await fetch('/gesture/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({label,action})});document.getElementById('gestureStatus').textContent=(await r.json()).message;}
 async function poll(){try{let r=await fetch('/status');let j=await r.json();document.getElementById('state').textContent=j.state+' · '+j.last_event;let a=document.getElementById('approval');a.textContent='';if(j.pending){let p=document.createElement('p');p.textContent='Подтвердить: '+j.pending.label;a.appendChild(p);let y=document.createElement('button');y.textContent='Разрешить';y.onclick=()=>approve(j.pending.id,true);a.appendChild(y);let n=document.createElement('button');n.textContent='Отмена';n.onclick=()=>approve(j.pending.id,false);a.appendChild(n);}document.getElementById('reply').textContent=j.reply;
+let sg=document.getElementById('searchSuggestions');sg.hidden=!j.search_suggestions;if(j.search_suggestions&&sg.srcdoc!==j.search_suggestions)sg.srcdoc=j.search_suggestions;
 if(lastSeq>=0&&j.seq!==lastSeq&&j.state.startsWith('ANSWER')&&document.getElementById('auto').checked){latest=j.reply;speakLatest();}else latest=j.reply;lastSeq=j.seq;}catch(e){document.getElementById('state').textContent='Disconnected';}}
 setInterval(poll,1200);poll();
 </script></html>'''
@@ -155,6 +166,7 @@ def event():
         VOICE_SESSION.stop();publish('Разговор завершён','READY','session_stop');return jsonify(ok=True)
     if event=='stop':
         from runtime10 import shutdown
+        _source_learning.cancel()
         _native_learning.cancel()  # NEXUS_NATIVE_DEVICE_STOP
         shutdown();cancel_all();publish('Остановлено пользователем','STOPPED','stop');return jsonify(ok=True)
     if event=='confirm_button':
@@ -165,6 +177,13 @@ def event():
 
 def process_text(text,event='text'):
     text=text.strip()[:3000]  # NEXUS_R86_PTT_10SEC
+    # NEXUS_PUBLIC_CONTROL: cancellation also revokes the source work lease.
+    if _native_learning.normalized(_native_learning.PREFIX.sub('', text)).rstrip('.!?') in ('выключи автообучение', 'выключить автообучение', 'отключи автообучение', 'останови обучение', 'отмени обучение'):
+        _source_learning.cancel()
+    source_control = _source_learning.ENGINE.control(text)
+    if source_control is not None:
+        publish_source_result(source_control, event)
+        return source_control, 200
     if not text:return {'error':'Пустой запрос'},400
     # NEXUS_NATIVE_CONTROL: local controls are never sent to the model.
     native_control = _native_learning.control(text)
@@ -233,6 +252,7 @@ def process_text(text,event='text'):
         return {'reply':_nexus_r893_message, 'provider':'Local', 'pending':False,
                  'actions':[{'name':'extension_activate','result':_nexus_r893_message}]}, _nexus_r893_status
     if text.lower() in ('стоп','остановись','отмена'):
+        _source_learning.cancel()
         _native_learning.cancel()  # NEXUS_NATIVE_TEXT_STOP
         cancel_all();publish('Остановлено','STOPPED',event);return {'reply':'Остановлено'},200
     # The owner's exact correction to a read-only question can be answered
@@ -245,6 +265,13 @@ def process_text(text,event='text'):
             publish(reply,'ANSWER via NEXUS 2.0 Memory',event)
             return {'reply':reply,'provider':'NEXUS-2-Local',
                     'actions':[], 'pending':False},200
+    # NEXUS_PUBLIC_REUSE: same query gets fresh data; followups keep the task.
+    source_result = _source_learning.reuse(text)
+    if source_result is None:
+        source_result = _source_learning.resume(text)
+    if source_result is not None:
+        publish_source_result(source_result, event)
+        return source_result, 200
     # NEXUS_NATIVE_REUSE: exact operation + fresh data, without a cloud call.
     native_result = _native_learning.reuse(text)
     if native_result is not None:
@@ -298,10 +325,17 @@ def process_text(text,event='text'):
     except Exception:
         app.logger.warning('NEXUS Skill Academy: could not remember unsupported intent')
     publish(answer,'CONFIRM' if response.get('pending') else 'ANSWER via '+response['provider'],event)
+    if response.get('provider') == 'NEXUS-Sources':
+        with mutex:
+            state['sources'] = response.get('sources', [])
+            state['search_suggestions'] = response.get('search_suggestions', '')
     # Optional voice output on Android; opt-in only and never synthesize an unapproved tool action.
     if os.environ.get('NEXUS_AUTO_TTS')=='1' and not response.get('pending'):
         threading.Thread(target=execute,args=('speak',answer[:350]),daemon=True).start()
-    return {'reply':answer,'provider':response['provider'],'actions':response['actions'],'pending':bool(response.get('pending')),
+    return {'reply':answer,'provider':response['provider'],'actions':response['actions'],
+            'sources':response.get('sources', []),'source_skill_id':response.get('source_skill_id'),
+            'search_suggestions':response.get('search_suggestions', ''),
+            'pending':bool(response.get('pending')),
             'learning':response.get('learning')},200  # NEXUS_NATIVE_RESULT
 
 @app.get('/local/<kind>')
@@ -343,6 +377,10 @@ def approve():
 # Never bypass the tool planner for phone actions, memory edits, permissions,
 # reminders, or ambiguous / unrecognized speech.
 def _nexus_fast_chat(transcript: str, answer: str) -> bool:
+    # NEXUS_PUBLIC_VOICE: the legacy audio shortcut must not invent live facts.
+    from nexus_quickbrain_r81 import is_fast_info
+    if not is_fast_info(transcript):
+        return False
     # NEXUS_NATIVE_VOICE: do not bypass task routing on legacy /voice.
     if _native_learning.is_task_request(transcript) or _native_learning.is_control(transcript):
         return False

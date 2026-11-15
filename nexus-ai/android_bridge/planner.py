@@ -6,6 +6,8 @@ from ai_provider import post_json, ProviderError, ask as fallback_ask, SYSTEM
 from learning20 import STORE as _learning20_store
 import native_learning  # NEXUS_NATIVE_PLANNER_IMPORT
 from agent import execute, save_dialog, recent_dialog, REQUIRES_APPROVAL
+import source_learning
+SYSTEM = SYSTEM + source_learning.PLANNER_HINT
 
 
 # NEXUS_R89_SPEED
@@ -46,6 +48,7 @@ TOOL_DESCRIPTIONS = {
     'torch_off': 'Выключить фонарик по запросу пользователя',
     'notify': 'Показать уведомление по запросу пользователя',
     'speak': 'Произнести текст через Android TTS по запросу пользователя',
+    'learn_public_source': 'Самостоятельно найти и изучить публичные источники, собрать проверяемый сценарий чтения и ответить. Для актуальных сведений, публичных API, документов, лент; также для вопросов без повелительного глагола. argument пустой; выполняется исходный запрос пользователя.',
 }
 READ_ONLY={'graph_search','goal_list','notification_digest','battery','notes_list','reminders_list','memory_search','reminder_timed_list'}
 MAX_CALLS=4
@@ -86,6 +89,14 @@ def plan(prompt, history, voice_mode=False):
             return {'reply':'Лимит шагов достигнут. Можно продолжить отдельным запросом.', 'provider':'Gemini','actions':actions,'pending':pending}
         # Bound tool execution to one function call per turn, per step.
         call=calls[0];name=call.get('name','');arg=str((call.get('args') or {}).get('argument',''))[:500]
+        # NEXUS_PUBLIC_DISPATCH: model arguments never replace the user request.
+        if name == 'learn_public_source':
+            if actions or pending:
+                return {'reply':'Часть действий уже выполнена. Не запускаю исходную задачу заново.',
+                        'provider':'NEXUS-Sources','actions':actions,'pending':pending,
+                        'learning':{'status':'partial','answered':False}}
+            import source_learning
+            return source_learning.learn(prompt)
         # NEXUS_NATIVE_DISPATCH: one acquisition per request, no replay of earlier actions.
         if name in ('learn_capability', 'extension_request', 'evolution_draft'):
             if actions or pending:
