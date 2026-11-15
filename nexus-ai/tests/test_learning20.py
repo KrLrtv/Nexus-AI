@@ -56,6 +56,15 @@ class LearningStoreTests(unittest.TestCase):
         self.db.set_sharing(False)
         self.assertEqual(self.db.context_for("короткие ответы"), "")
 
+    def test_preference_generalizes_across_topics_when_sharing_enabled(self):
+        self.db.remember("Отвечай кратко и по существу", kind="preference")
+        self.assertEqual(self.db.context_for("Как устроен редуктор"), "")
+        self.db.set_sharing(True)
+        system = self.db.context_for("Как устроен редуктор")
+        self.assertIn("Отвечай кратко", system)
+        self.assertNotIn("пароль", system)
+        self.assertEqual(self.db.list_facts()[0]["used"], 1)
+
     def test_correction_exact_match_only_and_feedback(self):
         self.db.feedback("Что такое энкодер?", "Это неправильно", -1,
                          "Энкодер преобразует движение в электрический сигнал.")
