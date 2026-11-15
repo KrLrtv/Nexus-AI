@@ -1,7 +1,7 @@
 name: Publish NEXUS 2.0 self-learning preview
 on:
   push:
-    branches: [feature/nexus-2-skill-academy]
+    branches: [feature/nexus-2-2-skill-forge]
 permissions:
   contents: write
 concurrency:
@@ -33,13 +33,13 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          TAG='v2.0.2-alpha'
+          TAG='v2.0.3-alpha'
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Preview already exists; immutable historical tag preserved."
             exit 0
           fi
           gh release create "$TAG" \
             --target "$GITHUB_SHA" \
-            --title "NEXUS AI v2.0.2-alpha — Skill Academy" \
+            --title "NEXUS AI v2.0.3-alpha — Skill Forge" \
             --notes-file V2_RELEASE_NOTES.md \
             --prerelease
