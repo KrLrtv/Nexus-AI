@@ -33,6 +33,10 @@ NEXUS AI: чистая установка в Termux из F-Droid.
       исходники android_bridge + прошивку platformio.ini/src/main.cpp).
       Можно передать локальный файл ZIP вместо URL.
 
+  bash NEXUS_FDroid_Clean_v2.sh finish HTTPS_RELEASE_ZIP_URL
+      Закончить прерванную установку: обновить исходники до релиза и
+      восстановить команды nexus, nexus update и nexus-stt без переустановки Ubuntu.
+
   bash NEXUS_FDroid_Clean_v2.sh inspect ZIP_FILE
       Без установки проверить, что ZIP подходит по структуре.
 
@@ -309,10 +313,12 @@ EOS
 }
 
 configure_first_run() {
-  [[ ! -f "$CFG/secrets.env" ]] || { info 'Существующие ключи сохранены.'; return; }
-  info 'Создаю локальный токен M5. API-ключи и Wi-Fi вводятся позже из меню nexus.'
-  # No Python input() or getpass() in a heredoc: stdin there contains program text.
-  python - <<'PY'
+  if [[ -f "$CFG/secrets.env" ]]; then
+    info 'Существующие ключи сохранены.'
+  else
+    info 'Создаю локальный токен M5. API-ключи и Wi-Fi вводятся позже из меню nexus.'
+    # No Python input() or getpass() in a heredoc: stdin there contains program text.
+    python - <<'PY'
 from pathlib import Path
 import secrets, shlex
 cfg=Path.home()/'.config/nexus'
@@ -328,6 +334,7 @@ if not path.exists():
     path.chmod(0o600)
     print('Локальный токен создан. Добавь Gemini и Wi-Fi в меню nexus.')
 PY
+  fi
   for mode in 'stt_mode:sherpa' 'voice_clarity_mode:clear' 'speed_mode:balanced'; do
     local key="${mode%%:*}" value="${mode#*:}"
     [[ -f "$CFG/$key" ]] || printf '%s\n' "$value" > "$CFG/$key"
@@ -358,19 +365,23 @@ case "$ACTION" in
     command -v python >/dev/null 2>&1 || die 'Для inspect требуется Python.'
     STAGE="$(mktemp -d)"; extract_release "$2" "$STAGE/unpack"; info 'ZIP содержит оба исходных проекта.'; exit 0;;
   doctor) need_termux; run_doctor; exit 0;;
-  prepare|install) need_termux;;
+  prepare|install|finish) need_termux;;
   *) show_help; die "Неизвестная команда: $ACTION";;
 esac
 
-if [[ "$ACTION" == install ]]; then
-  [[ -n "${2:-}" ]] || { show_help; die 'Для полной установки укажи опубликованный ZIP с исходниками NEXUS. Без исходников невозможно воспроизвести текущую R89.'; }
-  [[ ! -e "$HOME/nexus-ai" && ! -e "$HOME/nexus-firmware" ]] || die 'NEXUS уже установлен: это чистый установщик.'
+if [[ "$ACTION" == install || "$ACTION" == finish ]]; then
+  [[ -n "${2:-}" ]] || { show_help; die 'Укажи URL исходного ZIP релиза.'; }
+  if [[ "$ACTION" == install ]]; then
+    [[ ! -e "$HOME/nexus-ai" && ! -e "$HOME/nexus-firmware" ]] || die 'NEXUS уже установлен: выбери finish для восстановления.'
+  else
+    [[ -f "$HOME/nexus-ai/nexusctl.py" && -f "$HOME/nexus-firmware/firmware/platformio.ini" ]] || die 'Нет исходников для восстановления; нужен install.'
+  fi
 fi
 
 # Avoid logging potentially secret command-line URL query strings; regular release URLs preferred.
 init_log
 STAGE="$(mktemp -d "${TMPDIR:-$PREFIX/tmp}/nexus-fresh-XXXXXX")"
-if [[ "$ACTION" == install ]]; then
+if [[ "$ACTION" == install || "$ACTION" == finish ]]; then
   # A fresh F-Droid Termux has no Python: the ZIP verifier below requires it.
   # Install only this prerequisite before verifying the archive structure.
   if ! command -v python >/dev/null 2>&1; then
@@ -379,9 +390,21 @@ if [[ "$ACTION" == install ]]; then
   fi
   fetch_release "$2" >/dev/null
   extract_release "$STAGE/release.zip" "$STAGE/precheck"
-  rm -rf "$STAGE/precheck"
   info 'Структура ZIP проверена до установки пакетов.'
 fi
+
+if [[ "$ACTION" == finish ]]; then
+  info 'Восстанавливаю прерванную установку, сохраняя все локальные файлы...'
+  make_venv
+  configure_first_run
+  local_app_rel="$(sed -n '1p' "$STAGE/precheck/.nexus-source-paths")"
+  "$HOME/.venvs/nexus/bin/python" "$STAGE/precheck/$local_app_rel/nexus_update.py" --tag "v$VERSION" --archive "$STAGE/release.zip"
+  install_stt_launcher
+  run_doctor
+  info 'Установка восстановлена. Введи nexus и открой раздел M5StickC.'
+  exit 0
+fi
+
 install_termux_packages
 install_flashing_tools
 install_stt
@@ -390,13 +413,13 @@ if [[ "$ACTION" == install ]]; then
   make_venv
   configure_first_run
   install_stt_launcher
-  printf '%s\n' "v0.1.3-alpha" > "$CFG/installed_version"
+  printf 'v%s\n' "$VERSION" > "$CFG/installed_version"
   chmod 600 "$CFG/installed_version"
   info 'Wi-Fi M5StickC и сборка/прошивка доступны из меню nexus.'
   info 'Проверка исходников и окружения...'
   run_doctor
   info 'Готово. Запусти: nexus. Прошивка не выполнялась.'
-  info 'Для сборки и прошивки M5: cd ~/nexus-firmware/firmware && tpio run -e m5stickc_plus2'
+  info 'Настройка Wi-Fi и прошивка: nexus -> M5StickC Plus2.'
 else
   info 'БАЗОВОЕ ОКРУЖЕНИЕ ПОДГОТОВЛЕНО: Ubuntu, STT, eSpeak, PlatformIO, tpio, nrflash.'
   warn 'Сам NEXUS ещё НЕ установлен: нужен опубликованный ZIP с полными исходниками.'
