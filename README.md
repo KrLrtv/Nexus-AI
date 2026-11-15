@@ -1,6 +1,6 @@
 # NEXUS AI · M5StickC Plus2
 
-**Текущий экспериментальный релиз — v0.1.3-alpha.**
+**Текущий экспериментальный релиз — v0.1.4-alpha.**
 
 В этом релизе исправлен запуск `apt-get` во время `tpio setup`: для установки пакетов Ubuntu используется стандартная эмуляция жёстких ссылок PRoot. Прежнее поведение могло давать `dpkg: Permission denied`. Голосовой помощник с M5StickC Plus2, локальным Android-мостом на Termux и облачным NEXUS Brain.
 
@@ -24,7 +24,7 @@
 ```bash
 pkg update -y && pkg install -y curl && \
 curl -fL --retry 3 -o "$HOME/nexus-install.sh" \
-https://raw.githubusercontent.com/KrLrtv/Nexus-AI/v0.1.3-alpha/install.sh && \
+https://raw.githubusercontent.com/KrLrtv/Nexus-AI/v0.1.4-alpha/install.sh && \
 bash "$HOME/nexus-install.sh"
 ```
 
