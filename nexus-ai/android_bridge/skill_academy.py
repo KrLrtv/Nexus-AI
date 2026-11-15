@@ -258,36 +258,37 @@ def _learn(goal):
         session_id=_start(goal["id"],goal["recipient"])
         ses=_active()
         return _resolve(ses)
-    # For unknown capabilities, attempt a declarative READ-ONLY recipe. Never
-    # execute arbitrary model-written code or install packages from model output.
+    # No automatic activation from "научись". Gemini may design a new bounded
+    # text module; it must pass deterministic tests AND owner menu approval.
+    # Device/system/firmware work is recorded as requiring a trusted adapter.
     try:
-        from extensions import propose
-        proposal=propose(goal["intent"])
+        from skill_studio import propose
+        draft=propose(goal["intent"])
     except Exception:
-        return ("Пока не получилось создать безопасный навык. Я сохранил незавершённую задачу. "
-                "Для новых системных функций нужно разработать и проверить отдельный адаптер.")
-    if proposal.get("status")!="pending":
-        return ("Изучил возможность, но готового безопасного адаптера пока нет: "
-                +str(proposal.get("reason","потребуется разработка"))[:200])
-    ident=proposal["id"]
-    # User explicitly said "научись". Existing extensions only allow bounded
-    # read-only steps; verified again by decide(). Other action types are blocked.
-    from extensions import decide,run
-    result,status_code=decide(ident,True)
-    if status_code!=200:
-        return "Новый навык не прошёл проверку и не был активирован."
-    key="recipe:"+norm(goal["intent"])[:120]
-    _set_skill(key,"learned",{"extension_id":ident})
-    with LOCK:
-        with _connect() as c:
-            c.execute("UPDATE skill_goals SET status='learned' WHERE id=?",(goal["id"],))
-    try:
-        outcome,code=run(ident)
-        return ("Научился выполнять безопасный сценарий. Пробный запуск: "
-                +json.dumps(outcome,ensure_ascii=False)[:550] if code==200
-                else "Навык создан, но его проверочный запуск не удался.")
-    except Exception:
-        return "Безопасный навык создан, но тест пока не прошёл."
+        return ("Не удалось завершить проектирование навыка. "
+                "Задача сохранена, можно повторить команду «научись».")
+    identifier=draft["id"]
+    status=draft["status"]
+    if status in ("tested","active"):
+        passed=sum(1 for item in draft["report"] if item.get("passed"))
+        total=len(draft["report"])
+        with LOCK:
+            with _connect() as c:
+                c.execute("UPDATE skill_goals SET status='proposal_ready' WHERE id=?",
+                          (goal["id"],))
+        if status=="active":
+            return ("Модуль "+str(identifier)+" уже активен. "
+                    "Скажи «навык "+str(identifier)+": текст», чтобы применить.")
+        return ("Спроектировал новый модуль "+draft["name"]+" (ID "+str(identifier)+"). "
+                "Проверил "+str(passed)+"/"+str(total)+" примеров без запуска чужого кода. "
+                "Ничего не установлено. Открой меню NEXUS → Самообучение → "
+                "Новые навыки → Проверить модуль и включи после просмотра.")
+    if status=="needs_adapter":
+        return ("Разобрал задачу и сохранил проект #"+str(identifier)+". "
+                "Для её выполнения необходим новый проверенный адаптер или разрешение Android. "
+                "Незнакомый код не выполняется автоматически. "+draft["reason"][:200])
+    return ("Попробовал создать модуль #"+str(identifier)+", но проверка не прошла. "
+            +draft["reason"][:200])
 
 def _process_session(session,txt):
     normed=norm(txt)
@@ -361,6 +362,12 @@ def handle(text, history=None):
     if not str(text).strip():
         return None
     txt=PREFIX.sub("",str(text).strip()).strip()
+    # Explicitly named, locally tested skills run only through the safe
+    # interpreter, never by importing generated source.
+    from skill_studio import handle_voice as _studio_handle_voice
+    studio_result=_studio_handle_voice(txt)
+    if studio_result is not None:
+        return studio_result
     normalized=norm(txt)
     session=_active()
     if session and session["stage"] not in ("done","uncertain"):
