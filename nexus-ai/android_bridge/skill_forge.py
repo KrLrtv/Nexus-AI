@@ -198,7 +198,10 @@ def _pure_eval(expr, value):
     return _check_value(calc(expr))
 
 def pure_run(code: str,value):
-    return _pure_eval(_expression_tree(code),_primitive(value))
+    try:
+        return _pure_eval(_expression_tree(code),_primitive(value))
+    except ArithmeticError as exc:
+        raise ValueError("Недопустимая арифметическая операция.") from exc
 
 def validate(payload):
     if not isinstance(payload,dict):
@@ -311,7 +314,9 @@ def store(intent,payload):
             (intent,_norm(intent),payload["name"],payload["kind"],payload["summary"],
              json.dumps(payload,ensure_ascii=False),state,json.dumps(report,ensure_ascii=False),int(time.time())))
         ident=cur.lastrowid
-        c.execute("DELETE FROM drafts WHERE id NOT IN "
+        # Keep owner-approved skills across future draft creation.
+        # Only unapproved/rejected old drafts are pruned.
+        c.execute("DELETE FROM drafts WHERE state!='active' AND id NOT IN "
                   "(SELECT id FROM drafts ORDER BY id DESC LIMIT ?)",(MAX_DRAFTS,))
     return _get(ident)
 
