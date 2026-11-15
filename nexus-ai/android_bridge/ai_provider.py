@@ -49,7 +49,7 @@ def gemini(prompt, history):
         contents.append({'role':'model' if role == 'assistant' else 'user',
                          'parts':[{'text':content}]})
     contents.append({'role':'user', 'parts':[{'text':prompt}]})
-    payload={'systemInstruction': {'parts':[{'text': SYSTEM + _learning20_store.context_for(prompt)}]},
+    payload={'systemInstruction': {'parts':[{'text': SYSTEM + _learning20_store.safe_context_for(prompt)}]},
              'contents':contents,
              'generationConfig': {'maxOutputTokens': (120 if nexus_r89_fast() else 320)}}
     data=post_json(f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
@@ -66,7 +66,7 @@ def openrouter(prompt, history):
     key=os.getenv('OPENROUTER_API_KEY', '').strip()
     if not key:
         raise ProviderError('OPENROUTER_API_KEY отсутствует')
-    messages=[{'role':'system','content':SYSTEM + _learning20_store.context_for(prompt)}]
+    messages=[{'role':'system','content':SYSTEM + _learning20_store.safe_context_for(prompt)}]
     messages.extend({'role':r, 'content':t} for r,t in history[-8:])
     messages.append({'role':'user','content':prompt})
     data=post_json('https://openrouter.ai/api/v1/chat/completions',
