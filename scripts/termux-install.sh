@@ -92,6 +92,24 @@ install_flashing_tools() {
   # Installs the wrapper in Termux; the bootstrap below uses its supported setup command.
   (cd "$dir" && bash install.sh)
   command -v tpio >/dev/null 2>&1 || die 'Команда tpio не обнаружена.'
+  # On Android with SELinux enforcing, Ubuntu apt/dpkg needs PRoot's
+  # link2symlink hard-link emulation. Upstream tpio setup may explicitly
+  # disable it, making dpkg fail on /usr/bin/perl and status-old.
+  # Patch only the setup helper; leave proot_compile() unchanged.
+  local proot_lib="$dir/lib/proot.sh"
+  [[ -f "$proot_lib" ]] || die "Не найден tpio PRoot helper: $proot_lib"
+  python - "$proot_lib" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+source = p.read_text(encoding='utf-8')
+old = 'proot-distro login "$DISTRO" --no-link2symlink -- "$@"'
+new = 'proot-distro login "$DISTRO" -- "$@"'
+if old in source:
+    p.write_text(source.replace(old, new, 1), encoding='utf-8')
+elif new not in source:
+    raise SystemExit("Неизвестная версия tpio lib/proot.sh; автоисправление остановлено")
+PY
   info 'Настраиваю Ubuntu PRoot и PlatformIO...'
   tpio setup
 }
