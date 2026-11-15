@@ -10,6 +10,7 @@ from ai_provider import ask as cloud_ask, ProviderError
 from nexus_local_stt import ask_audio  # NEXUS_LOCAL_STT_R6
 from agent import execute, recognize, recent_dialog, save_dialog, REQUIRES_APPROVAL
 from planner import plan
+import native_learning as _native_learning  # NEXUS_NATIVE_IMPORT
 from reminder_clock import worker as reminder_worker, listing as reminder_listing
 from memory import recall as memory_recall
 from learning20 import handle_command as _learning20_handle, STORE as _learning20_store
@@ -154,6 +155,7 @@ def event():
         VOICE_SESSION.stop();publish('Разговор завершён','READY','session_stop');return jsonify(ok=True)
     if event=='stop':
         from runtime10 import shutdown
+        _native_learning.cancel()  # NEXUS_NATIVE_DEVICE_STOP
         shutdown();cancel_all();publish('Остановлено пользователем','STOPPED','stop');return jsonify(ok=True)
     if event=='confirm_button':
         # NEXUS_R893_DIRECT_COMMANDS: legacy firmware may still send this event.
@@ -164,6 +166,11 @@ def event():
 def process_text(text,event='text'):
     text=text.strip()[:3000]  # NEXUS_R86_PTT_10SEC
     if not text:return {'error':'Пустой запрос'},400
+    # NEXUS_NATIVE_CONTROL: local controls are never sent to the model.
+    native_control = _native_learning.control(text)
+    if native_control is not None:
+        publish(native_control['reply'], 'SETTINGS', event)
+        return native_control, 200
     # NEXUS 2.1: "научись" and interactive skills are routed locally BEFORE
     # a cloud request. Contact names/numbers, SMS drafts and confirmations
     # never enter Gemini dialogue history or the general tool planner.
@@ -226,6 +233,7 @@ def process_text(text,event='text'):
         return {'reply':_nexus_r893_message, 'provider':'Local', 'pending':False,
                  'actions':[{'name':'extension_activate','result':_nexus_r893_message}]}, _nexus_r893_status
     if text.lower() in ('стоп','остановись','отмена'):
+        _native_learning.cancel()  # NEXUS_NATIVE_TEXT_STOP
         cancel_all();publish('Остановлено','STOPPED',event);return {'reply':'Остановлено'},200
     # The owner's exact correction to a read-only question can be answered
     # locally without an API call. Never apply a cached correction to tool
@@ -237,6 +245,11 @@ def process_text(text,event='text'):
             publish(reply,'ANSWER via NEXUS 2.0 Memory',event)
             return {'reply':reply,'provider':'NEXUS-2-Local',
                     'actions':[], 'pending':False},200
+    # NEXUS_NATIVE_REUSE: exact operation + fresh data, without a cloud call.
+    native_result = _native_learning.reuse(text)
+    if native_result is not None:
+        publish(native_result['reply'], 'ANSWER via NEXUS Native', event)
+        return native_result, 200
     # NEXUS_R85_QUICK_RESPONSE: strictly read-only local responses; never run
     # permission, shell, plugin, or device-changing commands on this path.
     _nexus_local_answer=_nexus_local_reply(text)
@@ -252,7 +265,9 @@ def process_text(text,event='text'):
     # Device actions/permission changes always use the original gated planner.
     import time as _nexus_clock
     _nexus_started=_nexus_clock.monotonic()
-    _nexus_route='fast' if _nexus_is_fast_info(text) else 'planner'
+    # NEXUS_NATIVE_ROUTING: tasks use the capability-aware planner.
+    _nexus_route = ('fast' if _nexus_is_fast_info(text) and not
+                    _native_learning.is_task_request(text) else 'planner')
     try:
         if _nexus_route == 'fast':
             _nexus_answer=_nexus_ask_fast_r85(
@@ -275,7 +290,9 @@ def process_text(text,event='text'):
                        _nexus_route,_nexus_clock.monotonic()-_nexus_started)
     # The bounded planner already issued a single-use approval challenge.
     answer=response['reply']
-    save_dialog('user',text);save_dialog('assistant',answer)
+    # NEXUS_NATIVE_HISTORY: do not put native task inputs into future chat context.
+    if not response.get('learning'):
+        save_dialog('user',text);save_dialog('assistant',answer)
     try:
         _skill_academy_note_refusal(text,answer)
     except Exception:
@@ -284,7 +301,8 @@ def process_text(text,event='text'):
     # Optional voice output on Android; opt-in only and never synthesize an unapproved tool action.
     if os.environ.get('NEXUS_AUTO_TTS')=='1' and not response.get('pending'):
         threading.Thread(target=execute,args=('speak',answer[:350]),daemon=True).start()
-    return {'reply':answer,'provider':response['provider'],'actions':response['actions'],'pending':bool(response.get('pending'))},200
+    return {'reply':answer,'provider':response['provider'],'actions':response['actions'],'pending':bool(response.get('pending')),
+            'learning':response.get('learning')},200  # NEXUS_NATIVE_RESULT
 
 @app.get('/local/<kind>')
 def local_info(kind):
@@ -325,6 +343,9 @@ def approve():
 # Never bypass the tool planner for phone actions, memory edits, permissions,
 # reminders, or ambiguous / unrecognized speech.
 def _nexus_fast_chat(transcript: str, answer: str) -> bool:
+    # NEXUS_NATIVE_VOICE: do not bypass task routing on legacy /voice.
+    if _native_learning.is_task_request(transcript) or _native_learning.is_control(transcript):
+        return False
     text = ' '.join(transcript.casefold().split())
     if not text or len(text) > 260:
         return False
