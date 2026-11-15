@@ -26,6 +26,7 @@ from pathlib import Path
 HOME = Path.home()
 REPO = "KrLrtv/Nexus-AI"
 MANIFEST = "https://raw.githubusercontent.com/" + REPO + "/main/releases/channel.json"
+PREVIEW_MANIFEST = "https://raw.githubusercontent.com/" + REPO + "/main/releases/preview.json"
 CACHE = HOME / ".cache" / "nexus"
 CFG = HOME / ".config" / "nexus"
 APP = HOME / "nexus-ai"
@@ -64,17 +65,30 @@ def http_download(url: str, target: Path, limit: int) -> None:
             f.write(data)
 
 
-def target_release(override: str | None) -> str:
+def target_release(override: str | None, channel: str | None = None) -> str:
+    """Select an explicit channel or follow the currently installed major version."""
     if override:
         return validate_tag(override)
-    request = urllib.request.Request(MANIFEST, headers={"User-Agent": "NEXUS-Termux-Updater/1"})
+    if channel not in (None, "stable", "preview"):
+        raise ValueError("Неизвестный канал обновлений.")
+    if channel is None:
+        channel = "preview" if installed_version().startswith("v2.") else "stable"
+    url = PREVIEW_MANIFEST if channel == "preview" else MANIFEST
+    request = urllib.request.Request(url, headers={"User-Agent": "NEXUS-Termux-Updater/1"})
     with urllib.request.urlopen(request, timeout=20) as resp:
         if int(resp.headers.get("Content-Length", "0")) > 4096:
             raise ValueError("Слишком большой манифест версии")
         info = json.loads(resp.read(4097))
     if info.get("repository") != REPO:
         raise ValueError("Недостоверный адрес репозитория в манифесте")
-    return validate_tag(info["tag"])
+    if channel == "preview" and info.get("channel") != "preview":
+        raise ValueError("Неправильный канал предварительного релиза")
+    tag = validate_tag(info["tag"])
+    if channel == "preview" and not tag.startswith("v2."):
+        raise ValueError("В канале NEXUS 2.0 указана неподходящая версия")
+    if channel == "stable" and tag.startswith("v2."):
+        raise ValueError("Канал NEXUS 1.x содержит экспериментальную версию")
+    return tag
 
 
 def extract_sources(archive: Path, dest: Path) -> tuple[Path, Path]:
@@ -387,6 +401,11 @@ def main() -> int:
     commands.add_argument("--backups", action="store_true", help="Показать доступные резервные копии")
     commands.add_argument("--clear-backups", action="store_true", help="Удалить все резервные копии")
     parser.add_argument("--archive", type=Path, default=None, help="Локальный исходный ZIP (для восстановления установки)")
+    channel = parser.add_mutually_exclusive_group()
+    channel.add_argument("--preview", action="store_true",
+                         help="Явно выбрать тестовый канал NEXUS 2.x")
+    channel.add_argument("--stable", action="store_true",
+                         help="Явно выбрать обычный канал NEXUS 1.x")
     args = parser.parse_args()
     try:
         if args.rollback:
@@ -396,7 +415,8 @@ def main() -> int:
             return 0
         if args.clear_backups:
             return 0 if clear_backups() else 1
-        target = target_release(args.tag)
+        channel = "preview" if args.preview else "stable" if args.stable else None
+        target = target_release(args.tag, channel)
         if args.check:
             print("Установлена:", installed_version(), "| Доступна:", target)
             return 0
