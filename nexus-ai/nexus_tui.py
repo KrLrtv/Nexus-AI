@@ -25,8 +25,9 @@ sys.path.insert(0, str(ROOT))
 import nexusctl as engine
 import nexus_device as m5
 import nexus_update as releases
+import nexus_autostart as shell_startup
 sys.path.insert(0, str(ROOT / 'android_bridge'))
-from learning20 import STORE as learning_store
+from learning20 import STORE as learning_store, previous_exchange as learning_previous_exchange
 
 CFG = Path.home() / '.config' / 'nexus'
 LOG = Path.home() / 'nexus-ai.log'
@@ -144,7 +145,8 @@ class Tee(io.TextIOBase):
 class ControlCenter:
     def __init__(self):
         self.page = 'home'
-        self.selected = {'home':0,'settings':0,'m5':0,'learn':0}
+        self.selected = {'home':0,'settings':0,'m5':0,'learn':0,'versions':0,'learn-manage':0}
+        self.relaunch = False
         self.learning_filter = ''
         self.flash = ''
         self.flash_error = False
@@ -170,8 +172,8 @@ class ControlCenter:
                 ('M5StickC Plus2 · Wi-Fi и прошивка','m5'),
                 ('Настройки AI и голоса','settings'),
                 ('Самообучение · NEXUS 2.0','learn'),
-                ('Обновить NEXUS из GitHub','update'),
-                ('Откатить обновление NEXUS','rollback'),
+                ('Обновить NEXUS','update'),
+                ('Версии · NEXUS 2.0 · откат','versions'),
                 ('Журнал событий','logs'),
                 ('Диагностика','diagnostics'),
             ]
@@ -183,13 +185,33 @@ class ControlCenter:
                 ('Прошить собранную версию','m5-flash'),
                 ('Собрать и прошить M5','m5-build-flash'),
             ]
+        if self.page == 'versions':
+            try: autostart=shell_startup.enabled()
+            except (RuntimeError,OSError): autostart=False
+            return [
+                ('Проверить доступные версии','versions-check'),
+                ('Установить NEXUS 2.0 · эксперимент','versions-preview'),
+                ('Перейти на обычную версию 1.x','versions-stable'),
+                ('Откатить последнее обновление','rollback'),
+                ('Показать резервную копию','versions-backups'),
+                ('Удалить резервную копию','versions-clear'),
+                ('Автозапуск меню · '+('ВКЛ' if autostart else 'ВЫКЛ'),'versions-autostart'),
+            ]
         if self.page == 'learn':
             shared = learning_store.sharing()
             return [
                 ('Состояние обучения','learn-stats'),
+                ('Запомнить факт','learn-fact'),
+                ('Запомнить предпочтение','learn-preference'),
                 ('Воспоминания · список','learn-list'),
                 ('Найти в памяти','learn-search'),
+                ('Исправить последний ответ','learn-correct'),
+                ('Оценить последний ответ','learn-rate'),
                 ('Gemini: передавать память · '+('ДА' if shared else 'НЕТ'),'learn-toggle'),
+                ('Удаление и очистка памяти','learn-manage'),
+            ]
+        if self.page == 'learn-manage':
+            return [
                 ('Удалить запись по ID','learn-forget'),
                 ('Очистить всю память · подтверждение','learn-clear'),
             ]
@@ -224,8 +246,8 @@ class ControlCenter:
         except Exception: model = 'не определена'
         self.line('Модель: '+model,w)
         print()
-        if self.page in ('home','settings','m5','learn'):
-            print(c({'home':'  ГЛАВНАЯ','settings':'  НАСТРОЙКИ','m5':'  M5STICKC PLUS2','learn':'  ОБУЧЕНИЕ 2.0'}[self.page],ACCENT,True))
+        if self.page in ('home','settings','m5','learn','versions','learn-manage'):
+            print(c({'home':'  ГЛАВНАЯ','settings':'  НАСТРОЙКИ','m5':'  M5STICKC PLUS2','learn':'  ОБУЧЕНИЕ 2.0','versions':'  ВЕРСИИ И ОБНОВЛЕНИЯ','learn-manage':'  ПАМЯТЬ · УДАЛЕНИЕ'}[self.page],ACCENT,True))
             print()
             for i,(label,action) in enumerate(self.entries()):
                 focus = i == self.selected[self.page]
@@ -312,8 +334,31 @@ class ControlCenter:
             self.flash=sanitise('Ошибка: '+type(exc).__name__+': '+str(exc)[:140])
         self.cache_until=0
 
+    def updater_action(self, flags, restart=False, confirmation=None):
+        completed=False
+        def run():
+            nonlocal completed
+            if confirmation:
+                label,answer=confirmation
+                if input(label).strip()!=answer:
+                    print('Установка экспериментальной версии отменена.')
+                    return False
+            code=subprocess.run(
+                [sys.executable,str(ROOT/'nexus_update.py'),*flags],check=False).returncode
+            if code:
+                print('Действие не завершено. Проверь подробный вывод выше.')
+                return False
+            completed=True
+            print('Операция завершена успешно.')
+            return True
+        self.popup(run)
+        if completed and restart:
+            self.relaunch=True
+            self.run=False
+
     def handle(self, action):
         if action=='settings': self.page='settings';self.flash='';return
+        if action=='versions': self.page='versions';self.flash='';return
         if action=='learn': self.page='learn';self.flash='';return
         if action=='learn-stats':
             def learn_stats():
@@ -323,6 +368,55 @@ class ControlCenter:
                 print('Исправлений:',data['corrections'])
                 print('Облачная персонализация:', 'включена' if data['cloud_personalization'] else 'выключена')
             self.popup(learn_stats);return
+        if action=='learn-fact' or action=='learn-preference':
+            def add_learning():
+                kind = 'preference' if action=='learn-preference' else 'fact'
+                value=input('Что запомнить' + (' как предпочтение' if kind=='preference' else '') + ': ').strip()
+                if not value:
+                    print('Пустой ввод. Отменено.')
+                    return False
+                rec_id=learning_store.remember(value,kind)
+                print('Сохранено локально. ID записи:',rec_id)
+                return True
+            self.popup(add_learning,sensitive=True);return
+        if action=='learn-correct':
+            def correct_last():
+                from agent import recent_dialog
+                exchange=learning_previous_exchange(recent_dialog())
+                if not exchange:
+                    print('Нет завершённого ответа NEXUS для исправления.')
+                    return False
+                question,answer=exchange
+                print('Последний вопрос:',question[:130])
+                print('Прежний ответ:',answer[:160])
+                correction=input('Правильный ответ (Enter = отмена): ').strip()
+                if not correction:
+                    print('Изменение отменено.')
+                    return False
+                feedback_id=learning_store.feedback(question,answer,-1,correction)
+                print('Исправление сохранено. ID:',feedback_id)
+                return True
+            self.popup(correct_last,sensitive=True);return
+        if action=='learn-rate':
+            def rate_last():
+                from agent import recent_dialog
+                exchange=learning_previous_exchange(recent_dialog())
+                if not exchange:
+                    print('Нет завершённого ответа для оценки.')
+                    return False
+                question,answer=exchange
+                print('Последний вопрос:',question[:130])
+                print('Ответ:',answer[:160])
+                value=input('Оценка: 1 — верно, 2 — неверно, 0 — отмена: ').strip()
+                if value not in ('1','2'):
+                    print('Оценка отменена.')
+                    return False
+                learning_store.feedback(question,answer,1 if value=='1' else -1)
+                print('Оценка сохранена локально.')
+                return True
+            self.popup(rate_last);return
+        if action=='learn-manage':
+            self.page='learn-manage';self.flash='';return
         if action=='learn-list':
             self.learning_filter='';self.page='learning-list';self.flash='';return
         if action=='learn-search':
@@ -332,8 +426,12 @@ class ControlCenter:
         if action=='learn-toggle':
             def toggle_learning():
                 enabled=not learning_store.sharing()
+                if enabled and input('Передавать выбранные воспоминания в Gemini? Введи ДА: ').strip()!='ДА':
+                    print('Передача памяти осталась выключенной.')
+                    return False
                 learning_store.set_sharing(enabled)
                 print('Передача релевантных воспоминаний в Gemini:', 'ВКЛ' if enabled else 'ВЫКЛ')
+                return True
             self.popup(toggle_learning);return
         if action=='learn-forget':
             def forget_memory():
@@ -361,18 +459,38 @@ class ControlCenter:
         if action=='m5-build': self.popup(m5.build);return
         if action=='m5-flash': self.popup(m5.flash);return
         if action=='m5-build-flash': self.popup(m5.build_flash);return
-        if action=='rollback':
-            def run_rollback():
-                code = subprocess.run([sys.executable,str(ROOT/'nexus_update.py'),'--rollback'],check=False).returncode
-                if code: raise RuntimeError('Откат отменён или не выполнен. Проверь вывод выше')
-                print('Предыдущая версия восстановлена. Перезапусти меню nexus.')
-            self.popup(run_rollback);return
         if action=='update':
-            def run_update():
-                code = subprocess.run([sys.executable,str(ROOT/'nexus_update.py')],check=False).returncode
-                if code: raise RuntimeError('Обновление не удалось. Проверь вывод выше')
-                print('Готово. Для нового интерфейса перезапусти меню nexus.')
-            self.popup(run_update);return
+            self.updater_action([], restart=True);return
+        if action=='rollback':
+            self.updater_action(['--rollback'], restart=True);return
+        if action=='versions-preview':
+            self.updater_action(['--preview'], restart=True,
+                confirmation=('NEXUS 2.0 экспериментальный. Введи 2.0: ','2.0'));return
+        if action=='versions-stable':
+            confirm = (('Вернуться с 2.0 на обычную версию? Введи 1.x: ','1.x')
+                       if releases.installed_version().startswith('v2.') else None)
+            self.updater_action(['--stable'], restart=True, confirmation=confirm);return
+        if action=='versions-backups':
+            self.updater_action(['--backups']);return
+        if action=='versions-clear':
+            self.updater_action(['--clear-backups']);return
+        if action=='versions-check':
+            def check_versions():
+                for title,flag in (('Обычная версия 1.x','--stable'),
+                                   ('Экспериментальная 2.x','--preview')):
+                    print(title + ':')
+                    proc=subprocess.run([sys.executable,str(ROOT/'nexus_update.py'),
+                                         '--check', flag],check=False)
+                    if proc.returncode:
+                        print('Не удалось проверить этот канал (сеть или GitHub).')
+                print('Текущая версия:', releases.installed_version())
+            self.popup(check_versions);return
+        if action=='versions-autostart':
+            def toggle_autostart():
+                now=shell_startup.set_enabled(not shell_startup.enabled())
+                print('Автозапуск меню при открытии Termux:', 'ВКЛЮЧЕН' if now else 'ВЫКЛЮЧЕН')
+                print('Изменение начнёт действовать в новой сессии Termux.')
+            self.popup(toggle_autostart);return
         if action=='logs': self.page='logs';self.flash='';return
         if action=='diagnostics': self.page='diagnostics';self.flash='';return
         if action=='toggle':
@@ -412,10 +530,10 @@ class ControlCenter:
                 if key=='q': return
                 if key in ('0','back','h'):
                     if self.page=='home': return
-                    self.page='learn' if self.page=='learning-list' else 'home'
+                    self.page='learn' if self.page in ('learning-list','learn-manage') else 'home'
                     self.flash='';continue
                 if key=='r': self.cache_until=0;continue
-                if self.page not in ('home','settings','m5','learn'): continue
+                if self.page not in ('home','settings','m5','learn','versions','learn-manage'): continue
                 entries=self.entries()
                 selection=self.selected[self.page]
                 if key in ('down','j'):
@@ -434,7 +552,10 @@ class ControlCenter:
 
 
 def main():
-    ControlCenter().loop()
+    ui=ControlCenter()
+    ui.loop()
+    if ui.relaunch:
+        os.execv(sys.executable,[sys.executable,str(ROOT/'nexus_tui.py')])
 
 if __name__ == '__main__':
     main()
