@@ -167,38 +167,53 @@ class GeneralLearningTest(unittest.TestCase):
         self.patcher.stop()
         self.tmp.cleanup()
 
-    def test_cloud_refusal_then_learn_without_manual_skills(self):
-        self.assertTrue(academy.note_refusal("Заряди мой электросамокат",
-                                            "Не могу подключиться к самокату."))
-        fake_extensions=types.SimpleNamespace(
-            propose=lambda intent:{"id":17,"status":"pending"},
-            decide=lambda ident,approve:({"status":"active"},200),
-            run=lambda ident:({"name":"safe_new_skill","outputs":[{"tool":"battery","result":"75%"}]},200))
-        with patch.dict(sys.modules,{"extensions":fake_extensions}):
+    def test_cloud_refusal_then_staged_skill_needs_owner_approval(self):
+        self.assertTrue(academy.note_refusal("Проверь состояние батареи",
+                                            "Не могу проверить сейчас."))
+        fake_forge=types.SimpleNamespace(
+            propose=lambda intent:{
+                "id":17,"name":"show_battery","state":"tested",
+                "report":{"checks":[{"test":"dry_run","passed":True}]}},
+            run_intent=lambda intent:None)
+        with patch.dict(sys.modules,{"skill_forge":fake_forge}):
             result=academy.handle("научись")
-        self.assertIn("Научился",result)
-        self.assertEqual(academy.load_skill("recipe:"+academy.norm("Заряди мой электросамокат"))["status"],"learned")
-        with patch.dict(sys.modules,{"extensions":fake_extensions}):
-            result=academy.handle("Заряди мой электросамокат")
-        self.assertIn("safe_new_skill",result)
+        self.assertIn("Создал навык #17",result)
+        self.assertIn("Для включения",result)
+        # The proposed capability is NOT automatically activated.
+        self.assertEqual(academy.skills(),[])
 
     def test_unknown_skill_is_not_falsely_claimed(self):
-        self.assertTrue(academy.note_refusal("Измени прошивку","Не могу перепрошивать устройства."))
-        fake_extensions=types.SimpleNamespace(
-            propose=lambda text:{"status":"unsupported","reason":"нет безопасного адаптера"})
-        with patch.dict(sys.modules,{"extensions":fake_extensions}):
+        self.assertTrue(academy.note_refusal("Измени прошивку",
+                                            "Не могу перепрошивать устройства."))
+        fake_forge=types.SimpleNamespace(
+            propose=lambda text:{
+                "id":19,"name":"m5_patch","state":"review",
+                "report":{"checks":[{"test":"cpp_not_compiled","passed":False}]}})
+        with patch.dict(sys.modules,{"skill_forge":fake_forge}):
             result=academy.handle("научись")
-        self.assertIn("нет",result)
+        self.assertIn("черновик",result)
+        self.assertIn("не запускался",result)
         self.assertEqual(academy.skills(),[])
 
     def test_learning_from_dialog_without_old_skill_record(self):
         history=[("user","Создай новый аппаратный режим"),
                  ("assistant","Не могу сделать это сейчас.")]
-        fake_extensions=types.SimpleNamespace(
-            propose=lambda text:{"status":"unsupported","reason":"нужно разработать прошивку"})
-        with patch.dict(sys.modules,{"extensions":fake_extensions}):
+        fake_forge=types.SimpleNamespace(
+            propose=lambda text:{
+                "id":22,"name":"m5_hardware","state":"review",
+                "report":{"errors":["требуется ревью"]}})
+        with patch.dict(sys.modules,{"skill_forge":fake_forge}):
             result=academy.handle("научись",history)
-        self.assertIn("нужно разработать",result)
+        self.assertIn("черновик",result)
+
+    def test_when_gemini_is_unavailable_goal_is_preserved(self):
+        academy.note_refusal("Запусти неизвестный модуль","Не могу это сделать.")
+        fake_forge=types.SimpleNamespace(propose=lambda intent:(_ for _ in ()).throw(
+            RuntimeError("network unavailable")))
+        with patch.dict(sys.modules,{"skill_forge":fake_forge}):
+            result=academy.handle("научись")
+        self.assertIn("Сохранил задачу",result)
+        self.assertIsNotNone(academy.pending_goal())
 
 
 if __name__=="__main__":

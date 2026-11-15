@@ -312,6 +312,64 @@ class MenuOnlyWorkflowTest(unittest.TestCase):
                          "skills-pending","skills-learn","skills-clear"}.issubset(actions))
         self.assertLessEqual(len(screen.entries()),9)
 
+    def test_skill_forge_menu_requires_one_owner_activation(self):
+        screen,tui=self._ui()
+        screen.page="skills"
+        self.assertIn("forge",{action for _,action in screen.entries()})
+        screen.handle("forge")
+        self.assertEqual(screen.page,"forge")
+        actions={action for _,action in screen.entries()}
+        self.assertTrue({"forge-create","forge-list","forge-view",
+                         "forge-test","forge-approve","forge-reject"}.issubset(actions))
+        self.assertLessEqual(len(screen.entries()),9)
+
+    def test_unsafe_generated_cpp_cannot_be_approved_from_menu(self):
+        screen,tui=self._ui()
+        proposed={"id":1,"name":"m5_patch","kind":"proposal","state":"review",
+                  "summary":"Черновик M5","report":{"checks":[],"errors":[]},
+                  "payload":{"source":"void setup() {}"},"intent":"Код M5"}
+        fake=types.SimpleNamespace(
+            list_drafts=lambda n:[{"id":1}],
+            _get=lambda n:proposed,
+            approve=lambda n: (_ for _ in ()).throw(AssertionError("Must not approve"))
+        )
+        with patch.object(tui,"forge",fake),\
+             patch("builtins.input",return_value="1"),\
+             patch("sys.stdout",io.StringIO()):
+            screen.handle("forge-approve")
+        self.assertTrue(screen.flash_error)
+
+    def test_validated_skill_can_be_approved_explicitly_from_menu(self):
+        screen,tui=self._ui()
+        approved=[]
+        proposed={"id":12,"name":"battery_notes","kind":"recipe","state":"tested",
+                  "summary":"Статус","report":{"checks":[{"test":"dry_run","passed":True}]},
+                  "payload":{"steps":[]},"intent":"Покажи батарею"}
+        fake=types.SimpleNamespace(
+            list_drafts=lambda n:[{"id":12}],
+            _get=lambda n:proposed,
+            approve=lambda n:approved.append(n) or dict(proposed,state="active")
+        )
+        values=iter(["12","ОДОБРЯЮ 12"])
+        with patch.object(tui,"forge",fake),\
+             patch("builtins.input",side_effect=lambda *args: next(values)),\
+             patch("sys.stdout",io.StringIO()):
+            screen.handle("forge-approve")
+        self.assertEqual(approved,[12])
+        self.assertFalse(screen.flash_error)
+
+    def test_create_skill_through_menu_not_cli(self):
+        screen,tui=self._ui()
+        fake=types.SimpleNamespace(propose=lambda intent:{
+            "id":44,"name":"learning_module","summary":"Безопасный пример",
+            "state":"tested","report":{"checks":[{"test":"dry_run","passed":True}]}
+        })
+        with patch.object(tui,"forge",fake),\
+             patch("builtins.input",return_value="Сделай пример навыка"),\
+             patch("sys.stdout",io.StringIO()):
+            screen.handle("forge-create")
+        self.assertFalse(screen.flash_error)
+
     def test_skill_setup_declined_without_package_install(self):
         screen,tui=self._ui()
         academy_fake=types.SimpleNamespace(status=lambda:{"contacts_cli":False,"sms_cli":False},
