@@ -209,6 +209,7 @@ class TuiErrorTest(unittest.TestCase):
             "nexusctl": engine,
             "nexus_device": m5,
             "nexus_update": up,
+            "nexus_autostart": module("nexus_autostart_tui_tests", "nexus_autostart.py"),
         }):
             return module("nexus_tui_tests", "nexus_tui.py")
 
@@ -235,6 +236,122 @@ class TuiErrorTest(unittest.TestCase):
             screen.popup(simulated_success)
         self.assertEqual(screen.flash, "Сборка завершена")
         self.assertFalse(screen.flash_error)
+
+
+class MenuOnlyWorkflowTest(unittest.TestCase):
+    def _ui(self):
+        fake_engine = types.SimpleNamespace(request_status=lambda: 0, managed_pid=lambda: None,
+                                            config=lambda: {}, MODEL_DEFAULT="gemini-test")
+        startup = module("nexus_autostart_tests", "nexus_autostart.py")
+        with patch.dict(sys.modules, {
+            "nexusctl": fake_engine, "nexus_device": m5, "nexus_update": up,
+            "nexus_autostart": startup,
+        }):
+            tui = module("nexus_tui_menu_only_tests", "nexus_tui.py")
+        return tui.ControlCenter(), tui
+
+    def test_all_core_actions_are_accessible_from_menu(self):
+        screen, _ = self._ui()
+        root = dict((action,label) for label,action in screen.entries())
+        self.assertIn("update", root)
+        self.assertIn("versions", root)
+        self.assertIn("m5", root)
+        screen.page = "versions"
+        actions = {a for _,a in screen.entries()}
+        self.assertTrue({"versions-preview","versions-stable","rollback",
+                         "versions-backups","versions-clear",
+                         "versions-autostart"}.issubset(actions))
+
+    def test_preview_install_is_opt_in_and_restarts_interface(self):
+        screen, tui = self._ui()
+        commands=[]
+        def fake_run(args, check=False):
+            commands.append(args)
+            return types.SimpleNamespace(returncode=0)
+        with patch.object(tui.subprocess, "run",side_effect=fake_run), \
+             patch("builtins.input",return_value="2.0"), \
+             patch("sys.stdout",io.StringIO()):
+            screen.handle("versions-preview")
+        self.assertEqual(commands[0][-1], "--preview")
+        self.assertTrue(screen.relaunch)
+        self.assertFalse(screen.run)
+
+    def test_preview_cancel_never_downloads(self):
+        screen, tui = self._ui()
+        with patch.object(tui.subprocess, "run") as runner, \
+             patch("builtins.input",return_value="отмена"), \
+             patch("sys.stdout",io.StringIO()):
+            screen.handle("versions-preview")
+        runner.assert_not_called()
+        self.assertFalse(screen.relaunch)
+
+    def test_regular_one_button_update_uses_current_channel(self):
+        screen,tui=self._ui()
+        commands=[]
+        with patch.object(tui.subprocess, "run",
+                          side_effect=lambda args,check=False:
+                              commands.append(args) or types.SimpleNamespace(returncode=0)), \
+             patch("sys.stdout",io.StringIO()):
+            screen.handle("update")
+        self.assertEqual(commands[0], [tui.sys.executable,str(tui.ROOT/"nexus_update.py")])
+        self.assertTrue(screen.relaunch)
+
+
+class StartupIntegrationTest(unittest.TestCase):
+    def test_autostart_opt_in_and_disable_preserves_other_settings(self):
+        startup=module("nexus_autostart_independent", "nexus_autostart.py")
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            profile=root/".bashrc"
+            profile.write_text("export TEST_SETTING=kept\n", encoding="utf-8")
+            self.assertFalse(startup.enabled(root,"bash"))
+            self.assertTrue(startup.set_enabled(True,root,"bash"))
+            self.assertTrue(startup.enabled(root,"bash"))
+            data=profile.read_text()
+            self.assertIn("TEST_SETTING=kept",data)
+            self.assertIn("NEXUS_MENU_AUTO_ACTIVE=1 nexus",data)
+            self.assertFalse(startup.set_enabled(False,root,"bash"))
+            self.assertFalse(startup.enabled(root,"bash"))
+            self.assertIn("TEST_SETTING=kept",profile.read_text())
+
+    def test_do_not_replace_symlinked_shell_profile(self):
+        startup=module("nexus_autostart_secure", "nexus_autostart.py")
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            target=root/"target"
+            target.write_text("ORIGINAL\n")
+            (root/".bashrc").symlink_to(target)
+            with self.assertRaises(RuntimeError):
+                startup.set_enabled(True,root,"bash")
+            self.assertEqual(target.read_text(),"ORIGINAL\n")
+
+
+class UpdateChannelsTest(unittest.TestCase):
+    def test_channel_defaults_to_preview_only_when_installed_v2(self):
+        with patch.object(up,"installed_version",return_value="v2.0.0-alpha"):
+            with patch.object(up.urllib.request, "urlopen") as fetch:
+                fake = io.BytesIO(b'{"repository":"KrLrtv/Nexus-AI","tag":"v2.0.0-alpha","channel":"preview"}')
+                fake.headers = {}
+                fetch.return_value.__enter__.return_value = fake
+                self.assertEqual(up.target_release(None), "v2.0.0-alpha")
+                args=fetch.call_args[0][0]
+                self.assertIn("preview.json",args.full_url)
+        with patch.object(up,"installed_version",return_value="v0.1.6-alpha"):
+            with patch.object(up.urllib.request, "urlopen") as fetch:
+                fake = io.BytesIO(b'{"repository":"KrLrtv/Nexus-AI","tag":"v0.1.6-alpha","channel":"alpha"}')
+                fake.headers = {}
+                fetch.return_value.__enter__.return_value = fake
+                self.assertEqual(up.target_release(None), "v0.1.6-alpha")
+                self.assertIn("channel.json",fetch.call_args[0][0].full_url)
+
+    def test_reject_preview_manifest_pointing_to_stable(self):
+        with patch.object(up.urllib.request, "urlopen") as fetch:
+            fake=io.BytesIO(b'{"repository":"KrLrtv/Nexus-AI","tag":"v0.1.6-alpha","channel":"preview"}')
+            fake.headers = {}
+            fetch.return_value.__enter__.return_value = fake
+            with self.assertRaises(ValueError):
+                up.target_release(None,"preview")
+
 
 if __name__ == "__main__":
     unittest.main()
