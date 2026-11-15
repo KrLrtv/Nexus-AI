@@ -1,6 +1,6 @@
 {
   "repository": "KrLrtv/Nexus-AI",
   "channel": "preview",
-  "tag": "v2.0.3-alpha",
-  "description": "NEXUS 2.0.3 Skill Forge: AI-drafted skills, safe dry-run tests and menu approval; opt-in only"
+  "tag": "v2.0.4-alpha",
+  "description": "NEXUS 2.0.4 Skill Forge Cycle: bounded repair, fixed tests, owner approval and skill rollback; opt-in only"
 }
