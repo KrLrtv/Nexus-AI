@@ -333,7 +333,7 @@ def _process_session(session,txt):
                 with _connect() as c:
                     c.execute("UPDATE skill_goals SET status='learned' WHERE id=?",(session["goal_id"],))
             return ("Команда отправки SMS принята Android. Доставку проверить не могу. "
-                    "Навык сохранён: теперь для следующего сообщения скажи «напиши папе».")
+                    "Навык сохранён: в следующий раз можно сразу попросить отправить SMS.")
         return ("Отправка не подтверждена: "+out+" Проверь сообщения на телефоне, "
                 "прежде чем повторять, чтобы не отправить дважды.")
     if stage=="sending":
@@ -356,6 +356,9 @@ def handle(text, history=None):
         result=_process_session(session,txt)
         if result is not None:
             return result
+    # Never pass an orphaned SMS confirmation into Gemini/tool planning.
+    if normalized in CONFIRM:
+        return "Нет сообщения, ожидающего подтверждения отправки."
     if normalized in LEARN:
         goal=pending_goal()
         if not goal and history:
