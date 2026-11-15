@@ -167,38 +167,48 @@ class GeneralLearningTest(unittest.TestCase):
         self.patcher.stop()
         self.tmp.cleanup()
 
-    def test_cloud_refusal_then_learn_without_manual_skills(self):
-        self.assertTrue(academy.note_refusal("Заряди мой электросамокат",
-                                            "Не могу подключиться к самокату."))
-        fake_extensions=types.SimpleNamespace(
-            propose=lambda intent:{"id":17,"status":"pending"},
-            decide=lambda ident,approve:({"status":"active"},200),
-            run=lambda ident:({"name":"safe_new_skill","outputs":[{"tool":"battery","result":"75%"}]},200))
-        with patch.dict(sys.modules,{"extensions":fake_extensions}):
+    def test_refusal_then_learning_creates_tested_draft_not_auto_activation(self):
+        self.assertTrue(academy.note_refusal("Сделай текст заглавными",
+                                            "Пока не умею преобразовывать текст."))
+        import skill_studio
+        tested={"id":18,"status":"tested","name":"upper_text",
+                "report":[{"passed":True},{"passed":True}],"reason":""}
+        with patch.object(skill_studio,"propose",return_value=tested):
             result=academy.handle("научись")
-        self.assertIn("Научился",result)
-        self.assertEqual(academy.load_skill("recipe:"+academy.norm("Заряди мой электросамокат"))["status"],"learned")
-        with patch.dict(sys.modules,{"extensions":fake_extensions}):
-            result=academy.handle("Заряди мой электросамокат")
-        self.assertIn("safe_new_skill",result)
+        self.assertIn("Спроектировал новый модуль",result)
+        self.assertIn("Проверил 2/2",result)
+        self.assertEqual(academy.skills(),[])
+        self.assertIsNone(academy.pending_goal())
 
-    def test_unknown_skill_is_not_falsely_claimed(self):
-        self.assertTrue(academy.note_refusal("Измени прошивку","Не могу перепрошивать устройства."))
-        fake_extensions=types.SimpleNamespace(
-            propose=lambda text:{"status":"unsupported","reason":"нет безопасного адаптера"})
-        with patch.dict(sys.modules,{"extensions":fake_extensions}):
+    def test_unknown_device_skill_requires_adaptor_not_falsely_claimed(self):
+        self.assertTrue(academy.note_refusal("Измени прошивку",
+                                            "Не могу перепрошивать устройства."))
+        import skill_studio
+        needs={"id":21,"status":"needs_adapter","reason":"Нужен проверенный адаптер",
+               "name":"","report":[]}
+        with patch.object(skill_studio,"propose",return_value=needs):
             result=academy.handle("научись")
-        self.assertIn("нет",result)
+        self.assertIn("проверенный адаптер",result)
         self.assertEqual(academy.skills(),[])
 
     def test_learning_from_dialog_without_old_skill_record(self):
         history=[("user","Создай новый аппаратный режим"),
                  ("assistant","Не могу сделать это сейчас.")]
-        fake_extensions=types.SimpleNamespace(
-            propose=lambda text:{"status":"unsupported","reason":"нужно разработать прошивку"})
-        with patch.dict(sys.modules,{"extensions":fake_extensions}):
+        import skill_studio
+        needs={"id":31,"status":"needs_adapter","reason":"нужно разработать прошивку",
+               "name":"","report":[]}
+        with patch.object(skill_studio,"propose",return_value=needs):
             result=academy.handle("научись",history)
         self.assertIn("нужно разработать",result)
+
+    def test_failed_candidate_does_not_claim_success(self):
+        academy.add_goal("unknown","Необычный преобразователь текста")
+        import skill_studio
+        invalid={"id":23,"status":"failed","reason":"Тесты не прошли: 1/2","report":[]}
+        with patch.object(skill_studio,"propose",return_value=invalid):
+            result=academy.handle("научись")
+        self.assertIn("проверка не прошла",result)
+        self.assertEqual(academy.skills(),[])
 
 
 if __name__=="__main__":
