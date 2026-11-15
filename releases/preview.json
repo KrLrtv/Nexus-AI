@@ -1,6 +1,6 @@
 {
   "repository": "KrLrtv/Nexus-AI",
   "channel": "preview",
-  "tag": "v2.0.4-alpha",
-  "description": "NEXUS 2.0.4 Skill Forge Cycle: bounded repair, fixed tests, owner approval and skill rollback; opt-in only"
+  "tag": "v2.0.5-alpha",
+  "description": "NEXUS 2.0.5 Auto Learn & Answer: tested bounded skills activate automatically and answer the original request; SMS confirmation retained"
 }
