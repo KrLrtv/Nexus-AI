@@ -148,7 +148,7 @@ def record_version(tag: str) -> None:
     os.replace(tmp, VERSION_FILE)
 
 
-def update(tag: str) -> bool:
+def update(tag: str, source_archive: Path | None = None) -> bool:
     if not (APP / "nexusctl.py").is_file() or not (FW / "platformio.ini").is_file():
         raise RuntimeError("Исходники NEXUS не установлены. Сначала закончи установку из GitHub.")
     current = installed_version()
@@ -164,8 +164,14 @@ def update(tag: str) -> bool:
         work = Path(temp)
         archive = work / "release.zip"
         url = "https://codeload.github.com/" + REPO + "/zip/refs/tags/" + tag
-        print("Скачиваю релиз", tag, "...", flush=True)
-        http_download(url, archive, MAX_ARCHIVE)
+        if source_archive is not None:
+            print("Проверяю локальный архив релиза...", flush=True)
+            if source_archive.stat().st_size > MAX_ARCHIVE:
+                raise ValueError("Слишком большой архив")
+            shutil.copyfile(source_archive, archive)
+        else:
+            print("Скачиваю релиз", tag, "...", flush=True)
+            http_download(url, archive, MAX_ARCHIVE)
         staged_app, staged_fw = extract_sources(archive, work / "extracted")
         # Keep Wi-Fi SSID/password and the shared device token.
         config_local = FW / "src" / "config_local.h"
@@ -231,13 +237,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Обновление исходников NEXUS AI из GitHub Releases")
     parser.add_argument("--tag", default=None, help="Точный тег вместо актуального канала обновлений")
     parser.add_argument("--check", action="store_true", help="Проверить версию без установки")
+    parser.add_argument("--archive", type=Path, default=None, help="Локальный исходный ZIP (для восстановления установки)")
     args = parser.parse_args()
     try:
         target = target_release(args.tag)
         if args.check:
             print("Установлена:", installed_version(), "| Доступна:", target)
             return 0
-        update(target)
+        update(target, args.archive)
         return 0
     except (OSError, RuntimeError, ValueError, urllib.error.URLError, zipfile.BadZipFile) as exc:
         print("Обновление не выполнено:", exc, file=sys.stderr)
