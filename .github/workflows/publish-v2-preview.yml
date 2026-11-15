@@ -1,0 +1,45 @@
+name: Publish NEXUS 2.0 self-learning preview
+on:
+  push:
+    branches: [feature/nexus-2-learning-alpha]
+permissions:
+  contents: write
+concurrency:
+  group: nexus-2-preview
+  cancel-in-progress: false
+jobs:
+  publish-preview:
+    if: github.repository == 'KrLrtv/Nexus-AI'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Python and Termux shell scripts
+        run: |
+          set -euo pipefail
+          bash -n install.sh scripts/termux-install.sh
+          python scripts/check_release_consistency.py
+          python scripts/check_public_source.py
+          python - <<'PY'
+          import ast
+          from pathlib import Path
+          for path in Path('nexus-ai').rglob('*.py'):
+              ast.parse(path.read_text(encoding='utf-8-sig'), filename=str(path))
+          PY
+      - name: Run NEXUS 1.x and NEXUS 2.0 local unit tests
+        run: python -m unittest discover -s nexus-ai/tests -p 'test_*.py' -v
+      - name: Publish isolated pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          TAG='v2.0.0-alpha'
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Preview already exists; immutable historical tag preserved."
+            exit 0
+          fi
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "NEXUS AI 2.0.0-alpha - self-learning preview" \
+            --notes-file V2_RELEASE_NOTES.md \
+            --prerelease
