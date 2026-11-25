@@ -1,0 +1,8 @@
+{
+  "version": "0.3.0-preview",
+  "source_archive_sha256": "250723ba2dd0c24e21206e3f64aadee69ae1de95871dc71e34628bfc12dd8232",
+  "targets": ["android-debug-apk", "m5stickc-plus2-firmware", "windows-x64-directory"],
+  "hardware_tested": false,
+  "real_model_tested": false,
+  "local_python_tests_passed": 74
+}
