@@ -35,6 +35,9 @@ jobs:
           g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation work/tools/wire_test.cpp -o wire-test
           ./wire-test 4e58014407000000050068656c6c6ff18bcb81
       - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+          log-accepted-android-sdk-licenses: false
       - name: SDK packages
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - uses: gradle/actions/setup-gradle@v4
