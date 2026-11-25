@@ -1,0 +1,111 @@
+name: NEXUS PC Link preview builds
+on:
+  push:
+    branches: ['feature/nexus-pc-link-*']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: nexus-link-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  android-and-tests:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python nexus-pc-link/unpack.py work
+      - name: Install test dependencies
+        run: python -m pip install 'aiohttp>=3.12,<4' 'cryptography>=46,<48' 'jsonschema>=4.23,<5' 'qrcode[pil]>=8,<9' -r work/pc/requirements-test.txt
+      - name: Python integration and safety tests
+        working-directory: work/pc
+        run: python -m pytest -q --junitxml=../../pytest-results.xml
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Three-language wire parity
+        run: |
+          mkdir -p wire-java
+          javac -d wire-java work/android/app/src/main/java/ru/nexus/link/Wire.java work/tools/WireTest.java
+          java -cp wire-java WireTest 4e58014407000000050068656c6c6ff18bcb81
+          g++ -std=c++17 -Wall -Wextra -Werror -Wno-misleading-indentation work/tools/wire_test.cpp -o wire-test
+          ./wire-test 4e58014407000000050068656c6c6ff18bcb81
+      - uses: android-actions/setup-android@v3
+      - name: SDK packages
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Compile Android APK and lint
+        working-directory: work/android
+        run: gradle --no-daemon assembleDebug lintDebug
+      - name: Stage artifacts
+        run: |
+          mkdir -p android-artifacts
+          cp work/android/app/build/outputs/apk/debug/app-debug.apk android-artifacts/NEXUS-Link.apk
+          cp pytest-results.xml android-artifacts/
+          cp work/android/app/build/reports/lint-results-debug.* android-artifacts/
+          python -m pip freeze > android-artifacts/python-test-dependencies.txt
+          echo '${{ github.sha }}' > android-artifacts/BUILD_COMMIT.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nexus-android-tested
+          path: android-artifacts/
+          retention-days: 90
+  firmware:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python nexus-pc-link/unpack.py work
+      - run: python -m pip install platformio==6.1.18
+      - name: Compile Plus2 firmware
+        run: python -m platformio run -d work/firmware
+      - name: Stage firmware
+        run: |
+          python work/tools/collect_firmware.py
+          python -m platformio pkg list -d work/firmware > work/firmware-bin/build-dependencies.txt
+          echo '${{ github.sha }}' > work/firmware-bin/BUILD_COMMIT.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nexus-plus2-firmware
+          path: work/firmware-bin/
+          retention-days: 90
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python nexus-pc-link/unpack.py work
+      - name: Install runtime and packaging tools
+        run: python -m pip install -r work/pc/requirements.txt 'pyinstaller>=6.14,<7'
+      - name: Package PC executable
+        run: >-
+          python -m PyInstaller --noconfirm --clean --name NexusPC
+          --paths work/pc --add-data 'work/pc/nexus/panel.html;nexus'
+          --collect-all faster_whisper --collect-all ctranslate2 --collect-all tokenizers
+          --collect-all onnxruntime --collect-all av --collect-all jsonschema
+          --collect-all referencing --collect-all jsonschema_specifications
+          --collect-all qrcode --collect-all certifi
+          work/pc/launcher.py
+      - name: Start executable without model download
+        run: |
+          & .\dist\NexusPC\NexusPC.exe --help
+          if ($LASTEXITCODE -ne 0) { throw 'Executable failed smoke test' }
+          python -m pip freeze | Out-File -Encoding utf8 dist/NexusPC/build-dependencies.txt
+          '${{ github.sha }}' | Out-File -Encoding utf8 dist/NexusPC/BUILD_COMMIT.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nexus-windows-pc
+          path: dist/NexusPC/
+          retention-days: 90
