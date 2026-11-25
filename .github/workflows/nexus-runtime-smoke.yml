@@ -1,0 +1,91 @@
+name: NEXUS frozen Windows runtime verification
+on:
+  push:
+    branches: ['feature/nexus-pc-link-*']
+    paths: ['.github/workflows/nexus-runtime-smoke.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  runtime:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: nexus-windows-pc
+          run-id: 45714719986
+          github-token: ${{ github.token }}
+          path: pc-bin
+      - name: Run frozen service with temporary profile
+        shell: python
+        run: |
+          import hashlib, http.client, json, os, re, ssl, subprocess, tempfile, time
+          from pathlib import Path
+          from urllib.parse import parse_qs, urlsplit
+          exe=Path('pc-bin/NexusPC.exe').resolve()
+          result={'exe_sha256':hashlib.sha256(exe.read_bytes()).hexdigest(),'checks':[], 'real_model':False,'hardware':False,'artifact_run':45714719986}
+          with tempfile.TemporaryDirectory(prefix='nexus-smoke-') as td:
+            home=Path(td)
+            env=dict(os.environ,NEXUS_HOME=str(home),PYTHONIOENCODING='utf-8',BROWSER='true')
+            with (home/'runtime.log').open('wb') as log:
+              proc=subprocess.Popen([str(exe)],env=env,stdout=log,stderr=subprocess.STDOUT)
+              try:
+                token=None
+                for _ in range(90):
+                  if proc.poll() is not None:raise RuntimeError('Frozen EXE exited during startup')
+                  match=re.search(r'http://127\.0\.0\.1:8811/#([^\s]+)',(home/'runtime.log').read_text(encoding='utf8',errors='replace'))
+                  if match:token=match.group(1);break
+                  time.sleep(1)
+                if not token:raise RuntimeError('No admin endpoint announced')
+                result['checks'].append('frozen_executable_starts')
+                def call(method,path,data=None,bearer=None,tls=False):
+                  ctx=ssl.create_default_context(cafile=str(home/'server.crt')) if tls else None
+                  if ctx:ctx.check_hostname=False
+                  conn=http.client.HTTPSConnection('127.0.0.1',8843,context=ctx,timeout=10) if tls else http.client.HTTPConnection('127.0.0.1',8811,timeout=10)
+                  headers={}
+                  if bearer:headers['Authorization']='Bearer '+bearer
+                  if data is not None:headers['Content-Type']='application/json'
+                  try:
+                    conn.request(method,path,body=json.dumps(data).encode() if data is not None else None,headers=headers)
+                    response=conn.getresponse();body=response.read()
+                    return response.status,body
+                  finally:conn.close()
+                status,body=call('GET','/')
+                assert status==200 and b'<html' in body.lower()
+                result['checks'].append('bundled_panel_served')
+                assert call('GET','/state')[0]==401
+                status,body=call('GET','/state',bearer=token)
+                assert status==200
+                state=json.loads(body)
+                result['checks'].append('admin_auth_and_sqlite_state')
+                status,png=call('GET','/qr',bearer=token)
+                assert status==200 and png.startswith(b'\x89PNG\r\n\x1a\n')
+                result['checks'].append('bundled_qr_dependencies')
+                assert call('GET','/v1/health',tls=True)[0]==401
+                result['checks'].append('https_certificate_and_unauthorized_rejection')
+                q=parse_qs(urlsplit(state['uri']).query)
+                status,body=call('POST','/v1/pair',{'code':q['code'][0],'name':'CI disposable test'},tls=True)
+                assert status==200
+                phone=json.loads(body)['token']
+                assert call('POST','/v1/pair',{'code':q['code'][0]},tls=True)[0]==403
+                result['checks'].append('one_time_pairing')
+                status,body=call('GET','/v1/health',bearer=phone,tls=True)
+                assert status==200 and json.loads(body)['ok']
+                result['checks'].append('authenticated_phone_health')
+                result['status']='passed'
+              finally:
+                proc.terminate()
+                try:proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:proc.kill();proc.wait(timeout=10)
+          Path('windows-runtime-report.json').write_text(json.dumps(result,indent=2),encoding='utf8')
+          print(json.dumps(result,indent=2))
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nexus-windows-runtime-report
+          path: windows-runtime-report.json
+          retention-days: 90
