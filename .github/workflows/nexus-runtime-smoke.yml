@@ -78,6 +78,11 @@ jobs:
                 assert status==200 and json.loads(body)['ok']
                 result['checks'].append('authenticated_phone_health')
                 result['status']='passed'
+              except Exception:
+                raw=(home/'runtime.log').read_text(encoding='utf8',errors='replace')
+                raw=re.sub(r'(http://127\.0\.0\.1:8811/#)[^\s]+',r'\1REDACTED',raw)
+                print('REDACTED RUNTIME DIAGNOSTICS:',raw.encode('ascii','backslashreplace').decode())
+                raise
               finally:
                 proc.terminate()
                 try:proc.wait(timeout=10)
