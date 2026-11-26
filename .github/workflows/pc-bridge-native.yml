@@ -2,12 +2,12 @@ name: NEXUS PC Bridge native build
 on:
   push:
     branches: ['nexus/pc-bridge-0.4-build-20261126']
-    paths: ['native-input/**']
+    paths: ['native-input/**', '.github/workflows/pc-bridge-native.yml']
 permissions:
   contents: read
 jobs:
   native:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -19,7 +19,7 @@ jobs:
           encoded=''.join(p.read_text().strip() for p in sorted(root.glob('*.b64')))
           data=zlib.decompress(base64.b64decode(encoded,validate=True))
           assert hashlib.sha256(data).hexdigest()==root.joinpath('sha256.txt').read_text().strip()
-          for name, text in json.loads(data).items():
+          for name,text in json.loads(data).items():
               p=pathlib.Path('native')/name
               assert '..' not in p.parts and not pathlib.Path(name).is_absolute()
               p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text)
@@ -32,6 +32,9 @@ jobs:
         with:
           gradle-version: '8.9'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+          log-accepted-android-sdk-licenses: false
       - name: Android toolchain
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
       - name: Build Android APK
@@ -41,12 +44,15 @@ jobs:
           set -o pipefail
           gradle -p native/android --no-daemon assembleDebug 2>&1 | tee android-build.log
       - uses: actions/setup-python@v5
+        if: always()
         with:
           python-version: '3.11'
       - name: ESP32 toolchain
+        if: always()
         run: pip install platformio==6.1.18
       - name: Build M5StickC Plus2
         id: firmware
+        if: always()
         continue-on-error: true
         run: |
           set -o pipefail
@@ -61,7 +67,7 @@ jobs:
           cp native/android/app/build/outputs/apk/debug/app-debug.apk artifacts/android/NexusBridge-0.4-debug.apk 2>/dev/null || true
           for f in firmware.bin bootloader.bin partitions.bin; do cp native/firmware/.pio/build/m5stickc_plus2/$f artifacts/firmware/ 2>/dev/null || true; done
           if [ -f native/firmware/.pio/build/m5stickc_plus2/firmware.bin ]; then cp ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin artifacts/firmware/; fi
-          find artifacts -type f -print0 | sort -z | xargs -0 sha256sum > artifacts/SHA256SUMS.txt
+          find artifacts -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > artifacts/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
