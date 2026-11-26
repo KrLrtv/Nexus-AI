@@ -1,0 +1,74 @@
+name: NEXUS PC Bridge native build
+on:
+  push:
+    branches: ['nexus/pc-bridge-0.4-build-20261126']
+    paths: ['native-input/**']
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and extract build inputs
+        run: |
+          python - <<'PY'
+          import base64,zlib,json,hashlib,pathlib
+          root=pathlib.Path('native-input')
+          encoded=''.join(p.read_text().strip() for p in sorted(root.glob('*.b64')))
+          data=zlib.decompress(base64.b64decode(encoded,validate=True))
+          assert hashlib.sha256(data).hexdigest()==root.joinpath('sha256.txt').read_text().strip()
+          for name, text in json.loads(data).items():
+              p=pathlib.Path('native')/name
+              assert '..' not in p.parts and not pathlib.Path(name).is_absolute()
+              p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text)
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - uses: android-actions/setup-android@v3
+      - name: Android toolchain
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Build Android APK
+        id: android
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          gradle -p native/android --no-daemon assembleDebug 2>&1 | tee android-build.log
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: ESP32 toolchain
+        run: pip install platformio==6.1.18
+      - name: Build M5StickC Plus2
+        id: firmware
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          pio run -d native/firmware -e m5stickc_plus2 2>&1 | tee firmware-build.log
+      - name: Assemble outputs
+        if: always()
+        run: |
+          mkdir -p artifacts/android artifacts/firmware artifacts/source
+          cp android-build.log firmware-build.log artifacts/ 2>/dev/null || true
+          cp -r native/android native/firmware artifacts/source/ 2>/dev/null || true
+          find artifacts/source -type d \( -name .gradle -o -name build -o -name .pio \) -prune -exec rm -rf '{}' +
+          cp native/android/app/build/outputs/apk/debug/app-debug.apk artifacts/android/NexusBridge-0.4-debug.apk 2>/dev/null || true
+          for f in firmware.bin bootloader.bin partitions.bin; do cp native/firmware/.pio/build/m5stickc_plus2/$f artifacts/firmware/ 2>/dev/null || true; done
+          if [ -f native/firmware/.pio/build/m5stickc_plus2/firmware.bin ]; then cp ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin artifacts/firmware/; fi
+          find artifacts -type f -print0 | sort -z | xargs -0 sha256sum > artifacts/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: NexusBridge-native-0.4
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Require both native builds
+        if: always()
+        run: test '${{ steps.android.outcome }}' = success && test '${{ steps.firmware.outcome }}' = success
