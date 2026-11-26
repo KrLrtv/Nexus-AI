@@ -24,6 +24,7 @@ jobs:
               assert '..' not in p.parts and not pathlib.Path(name).is_absolute()
               p.parent.mkdir(parents=True,exist_ok=True);p.write_text(text)
           PY
+          python native-input/patch.py
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -43,6 +44,7 @@ jobs:
         run: |
           set -o pipefail
           gradle -p native/android --no-daemon assembleDebug 2>&1 | tee android-build.log
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs native/android/app/build/outputs/apk/debug/app-debug.apk | tee apk-verify.log
       - uses: actions/setup-python@v5
         if: always()
         with:
@@ -61,7 +63,7 @@ jobs:
         if: always()
         run: |
           mkdir -p artifacts/android artifacts/firmware artifacts/source
-          cp android-build.log firmware-build.log artifacts/ 2>/dev/null || true
+          cp android-build.log firmware-build.log apk-verify.log artifacts/ 2>/dev/null || true
           cp -r native/android native/firmware artifacts/source/ 2>/dev/null || true
           find artifacts/source -type d \( -name .gradle -o -name build -o -name .pio \) -prune -exec rm -rf '{}' +
           cp native/android/app/build/outputs/apk/debug/app-debug.apk artifacts/android/NexusBridge-0.4-debug.apk 2>/dev/null || true
@@ -77,4 +79,10 @@ jobs:
           retention-days: 14
       - name: Require both native builds
         if: always()
-        run: test '${{ steps.android.outcome }}' = success && test '${{ steps.firmware.outcome }}' = success
+        run: |
+          test -s artifacts/android/NexusBridge-0.4-debug.apk
+          test -s artifacts/firmware/firmware.bin
+          test -s artifacts/firmware/boot_app0.bin
+          grep -q 'BUILD SUCCESSFUL' artifacts/android-build.log
+          grep -q '\[SUCCESS\]' artifacts/firmware-build.log
+          grep -q 'Verified using v2 scheme.*true' artifacts/apk-verify.log
